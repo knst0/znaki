@@ -3,6 +3,7 @@ import { Loading, Show } from "@solidjs/web";
 import { createMemo, omit } from "solid-js";
 import type { IconData, IconName } from "znaki";
 import { symbolId } from "znaki";
+import { spriteUrl } from "virtual:znaki/sprite";
 
 import { isSpriteName, loadIcon } from "./loader.ts";
 
@@ -33,7 +34,7 @@ function IconShell(props: IconProps): JSX.Element {
       {...data()?.attrs}
       {...rest}
     >
-      <Show when={data()} fallback={<use href={`#${symbolId(props.name)}`} />}>
+      <Show when={data()} fallback={<use href={`${spriteUrl}#${symbolId(props.name)}`} />}>
         {(icon) => <g innerHTML={icon().body} />}
       </Show>
     </svg>
