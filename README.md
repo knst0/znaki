@@ -1,0 +1,86 @@
+# znaki
+
+Typesafe SVG icons for Vite. Collects the icons you actually use at build time, ships them as
+an external sprite or inlines them into the bundle, and generates a union type of every
+available icon name.
+
+## Install
+
+```sh
+pnpm add -D znaki @tabler/icons
+```
+
+`solid-js`, `@solidjs/web`, `@tabler/icons` and `vite` are optional peer dependencies — install
+only what you use.
+
+## Setup
+
+```ts
+import znaki, { local, tabler } from "znaki/vite";
+
+export default defineConfig({
+  plugins: [
+    znaki({
+      sources: [tabler(), local({ dir: "src/icons", mode: "inline" })],
+    }),
+  ],
+});
+```
+
+Add the generated declaration file and the virtual module types to your `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": { "types": ["znaki/client"] },
+  "include": ["src", "znaki.d.ts"]
+}
+```
+
+## Usage
+
+```tsx
+import { Icon, PreloadSprite } from "znaki/solid";
+
+<PreloadSprite />;
+<Icon name="tabler:home" size={24} />;
+<Icon name="local:logo" class="brand" />;
+```
+
+Icon names are `<prefix>:<name>`. Pass `prefix: ""` to a source to use bare names.
+
+## Sources
+
+| Source                           | Names                         |
+| -------------------------------- | ----------------------------- |
+| `tabler({ variant: "outline" })` | `tabler:home`                 |
+| `local({ dir: "src/icons" })`    | `local:logo`, `local:brand/x` |
+
+Sources are resolved in order, so an earlier source wins on a name collision. A custom source is
+just an object implementing `IconSource`.
+
+## Modes
+
+`mode` is set globally and can be overridden per source.
+
+- `sprite` (default) — icons become `<symbol>`s in a single hashed `znaki-sprite.svg` asset,
+  referenced with `<use href="/assets/znaki-sprite-<hash>.svg#znaki-tabler-home">`. One cacheable
+  request for the whole set.
+- `inline` — the icon markup is injected into the JSX at build time and bundled with the code.
+  No extra request, best for a handful of critical icons such as a logo.
+
+Names that cannot be resolved statically (a variable that is not a compile-time constant) fall
+back to a lazily imported registry, so they still work at the cost of a dynamic import.
+
+## Options
+
+| Option      | Default        | Description                                    |
+| ----------- | -------------- | ---------------------------------------------- |
+| `sources`   | —              | Icon sources, resolved in order                |
+| `mode`      | `"sprite"`     | Default delivery mode                          |
+| `component` | `"Icon"`       | JSX tag name the scanner looks for             |
+| `dts`       | `"znaki.d.ts"` | Where to write the generated names, or `false` |
+| `include`   | project root   | Directories to scan for icon usage             |
+
+## License
+
+This project is licensed under the terms of the [MIT License](/LICENSE).

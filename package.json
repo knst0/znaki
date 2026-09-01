@@ -1,0 +1,105 @@
+{
+  "name": "znaki",
+  "version": "0.0.0",
+  "description": "Typesafe SVG icons for Vite — collects the icons you actually use at build time, ships them as a sprite or inlines them, and generates a union type of every icon name.",
+  "keywords": [
+    "icons",
+    "iconset",
+    "solid",
+    "solid-js",
+    "sprite",
+    "svg",
+    "svg-sprite",
+    "tabler",
+    "typesafe",
+    "typescript",
+    "vite",
+    "vite-plugin"
+  ],
+  "license": "MIT",
+  "author": "Konstantin Kireyev <https://github.com/knst0>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/knst0/znaki.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./vite": {
+      "types": "./dist/vite/index.d.ts",
+      "default": "./dist/vite/index.js"
+    },
+    "./solid": {
+      "types": "./dist/solid/index.d.ts",
+      "solid": "./dist/solid/index.jsx",
+      "default": "./dist/solid/index.jsx"
+    },
+    "./client": "./dist/client.d.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "changeset": "changeset",
+    "fmt": "oxfmt",
+    "lint": "oxlint --type-aware --type-check",
+    "release": "pnpm build && changeset publish",
+    "typecheck": "tsc --noEmit",
+    "version": "changeset version"
+  },
+  "dependencies": {
+    "magic-string": "^0.30.21",
+    "oxc-parser": "^0.98.0"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.1",
+    "@solidjs/vite-plugin": "^3.0.0-next.36",
+    "@solidjs/web": "2.0.0-rc.4",
+    "@tabler/icons": "^3.46.0",
+    "@types/node": "^26.4.0",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
+    "oxlint-tsgolint": "^7.0.2001",
+    "solid-js": "2.0.0-rc.4",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  },
+  "peerDependencies": {
+    "@solidjs/web": ">=2.0.0-rc.4",
+    "@tabler/icons": ">=3",
+    "solid-js": ">=2.0.0-rc.4",
+    "vite": ">=7"
+  },
+  "peerDependenciesMeta": {
+    "@solidjs/web": {
+      "optional": true
+    },
+    "@tabler/icons": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.0.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.0.0"
+}
