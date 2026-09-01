@@ -1,6 +1,6 @@
 {
   "name": "znaki",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Typesafe SVG icons for Vite — collects the icons you actually use at build time, ships them as a sprite or inlines them, and generates a union type of every icon name.",
   "keywords": [
     "icons",
