@@ -10,7 +10,7 @@ available icon name.
 pnpm add -D znaki @tabler/icons
 ```
 
-`solid-js`, `@solidjs/web`, `@tabler/icons` and `vite` are optional peer dependencies — install
+`solid-js`, `@solidjs/web` and `@tabler/icons` are optional peer dependencies — install
 only what you use.
 
 ## Setup

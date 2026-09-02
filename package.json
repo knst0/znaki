@@ -92,9 +92,6 @@
     },
     "solid-js": {
       "optional": true
-    },
-    "vite": {
-      "optional": true
     }
   },
   "devEngines": {
