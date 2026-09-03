@@ -136,7 +136,11 @@ export default function znaki(options: ZnakiOptions): Plugin {
         if (this.environment.mode === "dev") {
           url = JSON.stringify(`${base}${DEV_SPRITE_PATH.slice(1)}?v=${spriteVersion}`);
         } else {
-          spriteRef ??= this.emitFile({ type: "asset", name: "znaki-sprite.svg" });
+          spriteRef ??= this.emitFile({
+            type: "asset",
+            name: "znaki-sprite.svg",
+            source: spriteMarkup(registry, spriteNames()),
+          });
           url = `import.meta.ROLLUP_FILE_URL_${spriteRef}`;
         }
         return `export const spriteUrl = ${url};\nexport const staticNames = new Set([${names}]);\n`;
@@ -147,10 +151,6 @@ export default function znaki(options: ZnakiOptions): Plugin {
         return data ? `export default ${JSON.stringify(data)};\n` : null;
       }
       return null;
-    },
-
-    renderStart() {
-      if (spriteRef) this.setAssetSource(spriteRef, spriteMarkup(registry, spriteNames()));
     },
 
     transform(code, id) {
@@ -230,20 +230,33 @@ function inlineTransform(code: string, component: string, registry: SourceRegist
 
   const s = new MagicString(code);
   const bindings = new Map<string, string>();
+  const declarations: string[] = [];
 
   for (const site of inlineSites) {
     let binding = bindings.get(site.name);
     if (!binding) {
       binding = `__znaki_${bindings.size}`;
       bindings.set(site.name, binding);
+      const data = registry.resolve(site.name)?.data;
+      if (data) declarations.push(`const ${binding} = ${iconLiteral(data)};`);
     }
     s.appendLeft(site.insertPos, ` data={${binding}}`);
   }
 
-  const imports = [...bindings].map(([name, binding]) => `import ${binding} from ${JSON.stringify(iconId(name))};`);
-  s.prepend(`${imports.join("\n")}\n`);
+  s.prepend(`${declarations.join("\n")}\n`);
 
   return { code: s.toString(), map: null };
+}
+
+function iconLiteral(data: IconData): string {
+  const attrs = Object.entries(data.attrs)
+    .map(([key, value]) => `${JSON.stringify(key)}: ${stringLiteral(value)}`)
+    .join(", ");
+  return `{ "body": ${stringLiteral(data.body)}, "viewBox": ${stringLiteral(data.viewBox)}, "attrs": { ${attrs} } }`;
+}
+
+function stringLiteral(value: string): string {
+  return value.includes('"') && !value.includes("'") && !value.includes("\\") ? `'${value}'` : JSON.stringify(value);
 }
 
 function spriteMarkup(registry: SourceRegistry, names: Set<string>): string {

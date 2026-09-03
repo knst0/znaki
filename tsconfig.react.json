@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "types": ["node", "react", "react-dom"]
+  },
+  "exclude": [],
+  "include": ["src/virtual.d.ts", "src/react", "test/react", "test/helpers/render-react.tsx", "test/helpers/react-env.ts"]
+}
