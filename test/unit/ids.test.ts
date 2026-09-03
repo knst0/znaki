@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { symbolId } from "../../src/id.ts";
 import {
   ICON_PREFIX,
   ICON_PREFIX_RESOLVED,
@@ -9,7 +10,20 @@ import {
   REGISTRY_RESOLVED,
   SPRITE_ID,
   SPRITE_RESOLVED,
-} from "../src/vite/ids.ts";
+} from "../../src/vite/ids.ts";
+
+describe("symbolId", () => {
+  it.each([
+    ["home", "znaki-home"],
+    ["arrow-right_2", "znaki-arrow-right_2"],
+    ["tabler:arrow/right", "znaki-tabler-arrow-right"],
+    ["a b.c", "znaki-a-b-c"],
+    ["ёлка", "znaki-----"],
+    ["", "znaki-"],
+  ])("maps %j to %j", (name, expected) => {
+    expect(symbolId(name)).toBe(expected);
+  });
+});
 
 describe("virtual ids", () => {
   it("exposes the public specifiers", () => {
@@ -30,9 +44,7 @@ describe("virtual ids", () => {
     expect(iconId("nested/icon name")).toBe("virtual:znaki/icon/nested%2Ficon%20name");
   });
 
-  it("round-trips through the resolved id", () => {
-    for (const name of ["home", "tabler:arrow-right", "nested/icon name", "a+b&c"]) {
-      expect(iconName(`\0${iconId(name)}`)).toBe(name);
-    }
+  it.each(["home", "tabler:arrow-right", "nested/icon name", "a+b&c"])("round-trips %j", (name) => {
+    expect(iconName(`\0${iconId(name)}`)).toBe(name);
   });
 });

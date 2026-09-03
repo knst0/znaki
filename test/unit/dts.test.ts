@@ -1,24 +1,16 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { writeDts } from "../src/vite/dts.ts";
+import { writeDts } from "../../src/vite/dts.ts";
+import { useProject } from "../fixtures/project.ts";
 
-let dir: string;
-
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "znaki-dts-"));
-});
-
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
-});
+const project = useProject("znaki-dts");
 
 describe("writeDts", () => {
   it("writes a module augmentation for the given names", () => {
-    const path = join(dir, "znaki.d.ts");
+    const path = join(project.root, "znaki.d.ts");
     writeDts(path, ["home", "tabler:arrow-right"]);
 
     expect(readFileSync(path, "utf-8")).toBe(
@@ -38,28 +30,28 @@ export {};
   });
 
   it("writes an empty interface for no names", () => {
-    const path = join(dir, "znaki.d.ts");
+    const path = join(project.root, "znaki.d.ts");
     writeDts(path, []);
 
     expect(readFileSync(path, "utf-8")).toContain("interface IconNameMap {\n\n  }");
   });
 
   it("escapes names that need quoting", () => {
-    const path = join(dir, "znaki.d.ts");
+    const path = join(project.root, "znaki.d.ts");
     writeDts(path, ['we"ird']);
 
     expect(readFileSync(path, "utf-8")).toContain(String.raw`"we\"ird": never;`);
   });
 
   it("creates missing parent directories", () => {
-    const path = join(dir, "a", "b", "znaki.d.ts");
+    const path = join(project.root, "a", "b", "znaki.d.ts");
     writeDts(path, ["home"]);
 
     expect(readFileSync(path, "utf-8")).toContain('"home"');
   });
 
   it("does not rewrite the file when content is unchanged", async () => {
-    const path = join(dir, "znaki.d.ts");
+    const path = join(project.root, "znaki.d.ts");
     writeDts(path, ["home"]);
     const first = statSync(path).mtimeMs;
 
@@ -70,7 +62,7 @@ export {};
   });
 
   it("rewrites the file when the names change", () => {
-    const path = join(dir, "znaki.d.ts");
+    const path = join(project.root, "znaki.d.ts");
     writeDts(path, ["home"]);
     writeDts(path, ["home", "user"]);
 
@@ -78,7 +70,7 @@ export {};
   });
 
   it("overwrites unrelated existing content", () => {
-    const path = join(dir, "znaki.d.ts");
+    const path = join(project.root, "znaki.d.ts");
     writeFileSync(path, "stale");
     writeDts(path, ["home"]);
 

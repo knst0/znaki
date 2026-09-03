@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { scanIcons } from "../src/vite/scan.ts";
+import { scanIcons } from "../../src/vite/scan.ts";
 
 function names(code: string, component = "Icon"): string[] {
   return [...scanIcons(code, component).names].sort();

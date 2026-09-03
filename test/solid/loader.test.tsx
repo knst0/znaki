@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { isSpriteName, loadIcon } from "../../src/solid/loader.ts";
-import { lazyIcon } from "./stubs.ts";
+import { lazyIcon } from "../fixtures/virtual.ts";
 
 describe("isSpriteName", () => {
   it("is true for names baked into the sprite", () => {

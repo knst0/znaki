@@ -1,33 +1,9 @@
-import { render } from "@solidjs/web";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { Icon } from "../../src/solid/Icon.tsx";
 import { PreloadSprite } from "../../src/solid/PreloadSprite.tsx";
-import { lazyIcon, spriteUrl } from "./stubs.ts";
-
-const disposers: (() => void)[] = [];
-
-function mount(component: () => unknown): HTMLElement {
-  const host = document.createElement("div");
-  document.body.append(host);
-  disposers.push(render(component as never, host));
-  return host;
-}
-
-function svg(host: HTMLElement): SVGSVGElement {
-  const element = host.querySelector("svg");
-  if (!element) throw new Error("no svg rendered");
-  return element;
-}
-
-async function flush(): Promise<void> {
-  await new Promise((done) => setTimeout(done, 0));
-}
-
-afterEach(() => {
-  for (const dispose of disposers.splice(0)) dispose();
-  document.body.innerHTML = "";
-});
+import { lazyIcon, spriteUrl } from "../fixtures/virtual.ts";
+import { flush, mount, svg } from "../helpers/render.tsx";
 
 describe("Icon: sprite mode", () => {
   it("references the sprite symbol through use", () => {

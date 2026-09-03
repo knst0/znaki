@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSvg } from "../src/vite/svg.ts";
+import { parseSvg } from "../../src/vite/svg.ts";
 
 describe("parseSvg", () => {
   it("extracts body, viewBox and attrs", () => {

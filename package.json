@@ -54,6 +54,10 @@
     "lint": "oxlint --type-aware --type-check",
     "release": "pnpm build && changeset publish",
     "test": "vitest",
+    "test:matrix": "pnpm test:vite7 && pnpm test:vite8",
+    "test:run": "vitest run",
+    "test:vite7": "cross-env VITE_DEPENDENCY=vite7 vitest run --project unit --project vite",
+    "test:vite8": "cross-env VITE_DEPENDENCY=vite8 vitest run --project unit --project vite",
     "typecheck": "tsc --noEmit",
     "version": "changeset version"
   },
@@ -67,6 +71,7 @@
     "@solidjs/web": "2.0.0-rc.4",
     "@tabler/icons": "^3.46.0",
     "@types/node": "^26.4.1",
+    "cross-env": "^10.1.0",
     "happy-dom": "^20.13.2",
     "oxfmt": "^0.66.0",
     "oxlint": "^1.81.0",
@@ -75,6 +80,8 @@
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
+    "vite7": "npm:vite@^7",
+    "vite8": "npm:vite@^8",
     "vitest": "5.0.0-rc.4"
   },
   "peerDependencies": {
