@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 
 import solid from "@solidjs/vite-plugin";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 const root = import.meta.dirname;
@@ -49,6 +50,22 @@ export default defineConfig({
           name: "solid",
           environment: "happy-dom",
           include: ["test/solid/*.test.tsx"],
+        },
+      },
+      {
+        plugins: [react({ jsxImportSource: "react" })],
+        resolve: {
+          alias: {
+            znaki: resolve(root, "src/index.ts"),
+            "virtual:znaki/sprite": virtualStubs,
+            "virtual:znaki/registry": virtualStubs,
+          },
+        },
+        test: {
+          name: "react",
+          environment: "happy-dom",
+          setupFiles: ["test/helpers/react-env.ts"],
+          include: ["test/react/*.test.tsx"],
         },
       },
     ],

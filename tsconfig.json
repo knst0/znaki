@@ -21,5 +21,6 @@
       "znaki": ["./src/index.ts"]
     }
   },
-  "include": ["src", "test", "tsdown.config.ts", "vitest.config.ts"]
+  "include": ["src", "test", "tsdown.config.ts", "vitest.config.ts"],
+  "exclude": ["test/react", "test/helpers/render-react.tsx"]
 }

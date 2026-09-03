@@ -5,6 +5,7 @@
   "keywords": [
     "icons",
     "iconset",
+    "react",
     "solid",
     "solid-js",
     "sprite",
@@ -41,6 +42,10 @@
       "solid": "./dist/solid/index.jsx",
       "default": "./dist/solid/index.jsx"
     },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "default": "./dist/react/index.js"
+    },
     "./client": "./dist/client.d.ts",
     "./package.json": "./package.json"
   },
@@ -58,7 +63,7 @@
     "test:run": "vitest run",
     "test:vite7": "cross-env VITE_DEPENDENCY=vite7 vitest run --project unit --project vite",
     "test:vite8": "cross-env VITE_DEPENDENCY=vite8 vitest run --project unit --project vite",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.react.json",
     "version": "changeset version"
   },
   "dependencies": {
@@ -71,11 +76,16 @@
     "@solidjs/web": "2.0.0-rc.4",
     "@tabler/icons": "^3.46.0",
     "@types/node": "^26.4.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.6",
+    "@vitejs/plugin-react": "^6.1.1",
     "cross-env": "^10.1.0",
     "happy-dom": "^20.13.2",
     "oxfmt": "^0.66.0",
     "oxlint": "^1.81.0",
     "oxlint-tsgolint": "^7.0.2001",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "solid-js": "2.0.0-rc.4",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
@@ -87,6 +97,7 @@
   "peerDependencies": {
     "@solidjs/web": ">=2.0.0-rc.4",
     "@tabler/icons": ">=3",
+    "react": ">=19",
     "solid-js": ">=2.0.0-rc.4",
     "vite": ">=7"
   },
@@ -95,6 +106,9 @@
       "optional": true
     },
     "@tabler/icons": {
+      "optional": true
+    },
+    "react": {
       "optional": true
     },
     "solid-js": {

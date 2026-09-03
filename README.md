@@ -10,7 +10,7 @@ available icon name.
 pnpm add -D znaki @tabler/icons
 ```
 
-`solid-js`, `@solidjs/web` and `@tabler/icons` are optional peer dependencies — install
+`solid-js`, `@solidjs/web`, `react` and `@tabler/icons` are optional peer dependencies — install
 only what you use.
 
 ## Setup
@@ -38,12 +38,23 @@ Add the generated declaration file and the virtual module types to your `tsconfi
 
 ## Usage
 
+Import the components from the entry point for your framework — `znaki/solid` or `znaki/react`.
+Both expose the same API.
+
 ```tsx
 import { Icon, PreloadSprite } from "znaki/solid";
 
 <PreloadSprite />;
 <Icon name="tabler:home" size={24} />;
 <Icon name="local:logo" class="brand" />;
+```
+
+```tsx
+import { Icon, PreloadSprite } from "znaki/react";
+
+<PreloadSprite />;
+<Icon name="tabler:home" size={24} />;
+<Icon name="local:logo" className="brand" />;
 ```
 
 Icon names are `<prefix>:<name>`. Pass `prefix: ""` to a source to use bare names.

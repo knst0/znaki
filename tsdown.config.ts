@@ -28,4 +28,14 @@ export default defineConfig([
     deps: { neverBundle: ["solid-js", "@solidjs/web", "znaki", /^virtual:znaki/] },
     outputOptions: { entryFileNames: "[name].jsx" },
   },
+  {
+    entry: ["src/react/index.ts"],
+    outDir: "dist/react",
+    tsconfig: "tsconfig.react.json",
+    format: "esm",
+    platform: "neutral",
+    dts: true,
+    fixedExtension: false,
+    deps: { neverBundle: ["react", "react/jsx-runtime", "znaki", /^virtual:znaki/] },
+  },
 ]);
