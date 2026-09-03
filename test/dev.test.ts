@@ -38,6 +38,7 @@ async function start(options: Partial<ZnakiOptions> = {}): Promise<ViteDevServer
   server = await createServer({
     root,
     logLevel: "silent",
+    oxc: { jsx: "preserve" },
     server: { middlewareMode: true, watch: null },
     plugins: [znaki({ sources: [source], dts: false, ...options })],
   });
@@ -83,6 +84,7 @@ describe("dev sprite module", () => {
       root,
       base: "/app/",
       logLevel: "silent",
+      oxc: { jsx: "preserve" },
       server: { middlewareMode: true, watch: null },
       plugins: [znaki({ sources: [source], dts: false })],
     });

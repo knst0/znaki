@@ -1,9 +1,9 @@
 import type { JSX } from "@solidjs/web";
 import { Loading, Show } from "@solidjs/web";
 import { createMemo, omit } from "solid-js";
+import { spriteUrl } from "virtual:znaki/sprite";
 import type { IconData, IconName } from "znaki";
 import { symbolId } from "znaki";
-import { spriteUrl } from "virtual:znaki/sprite";
 
 import { isSpriteName, loadIcon } from "./loader.ts";
 

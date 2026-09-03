@@ -42,6 +42,7 @@ async function bundle(options: Parameters<typeof znaki>[0], entry = "main.tsx"):
   const result = (await build({
     root,
     logLevel: "silent",
+    oxc: { jsx: { runtime: "classic" } },
     customLogger: {
       info: () => {},
       warn: (message: string) => warnings.push(message),
@@ -148,7 +149,7 @@ describe("inline transform", () => {
 
     const code = chunk(await bundle({ sources: [memory("inline")], dts: false }));
 
-    expect(code).toContain(`<path d="M1 1"/>`);
+    expect(code).toContain(`M1 1`);
     expect(code).toContain(`"viewBox": "0 0 16 16"`);
     expect(code).toMatch(/data:\s*__znaki_0/);
   });
