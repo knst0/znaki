@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { normalizePath } from "vite";
 import type { EnvironmentModuleNode, Plugin } from "vite";
 
 import { symbolId } from "../id.ts";
@@ -74,7 +75,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
   function collectDir(dir: string, warn: (msg: string) => void): void {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.name === "node_modules" || entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
-      const full = resolve(dir, entry.name);
+      const full = normalizePath(resolve(dir, entry.name));
       if (entry.isDirectory()) collectDir(full, warn);
       else if (SOURCE_FILE_RE.test(entry.name)) record(full, readFileSync(full, "utf-8"), warn);
     }
@@ -111,7 +112,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
       const root = this.environment.config.root;
       const warn = (message: string): void => this.warn(message);
       for (const dir of options.include ?? [root]) {
-        const full = resolve(root, dir);
+        const full = normalizePath(resolve(root, dir));
         if (existsSync(full)) collectDir(full, warn);
       }
 
@@ -169,7 +170,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
     },
 
     hotUpdate({ file, read, modules }) {
-      const fromSourceDir = registry.watchDirs.some((dir) => file.startsWith(dir));
+      const fromSourceDir = registry.watchDirs.some((dir) => normalizePath(file).startsWith(`${dir}/`));
       if (!fromSourceDir && (!SOURCE_FILE_RE.test(file) || file.includes("node_modules"))) return;
 
       if (fromSourceDir) {

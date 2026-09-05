@@ -1,6 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { posix, resolve } from "node:path";
 
+import { normalizePath } from "vite";
+
 import type { IconData } from "../../types.ts";
 import type { IconSource } from "../source.ts";
 import { parseSvg } from "../svg.ts";
@@ -19,7 +21,7 @@ export function local(options: LocalOptions): IconSource {
       dir = resolve(root, options.dir);
     },
     get dirs(): string[] {
-      return [dir];
+      return [normalizePath(dir)];
     },
     list: () => (existsSync(dir) ? walk(dir, "") : []),
     load: (name: string): IconData | null => {
