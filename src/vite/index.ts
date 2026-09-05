@@ -35,7 +35,7 @@ interface FileIcons {
 
 export default function znaki(options: ZnakiOptions): Plugin {
   const component = options.component ?? "Icon";
-  const componentRe = new RegExp(`<${component.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+  const componentRe = new RegExp(`<${escapeRegex(component)}\\b`);
   const registry = new SourceRegistry(options.sources);
   const byFile = new Map<string, FileIcons>();
   const warned = new Set<string>();
@@ -261,11 +261,31 @@ function symbolMarkup(name: string, data: IconData): string {
   const attrs = Object.entries(data.attrs)
     .map(([key, value]) => ` ${key}="${escapeAttr(value)}"`)
     .join("");
-  return `<symbol id="${symbolId(name)}" viewBox="${escapeAttr(data.viewBox)}"${attrs}>${data.body}</symbol>`;
+  const id = symbolId(name);
+  return `<symbol id="${id}" viewBox="${escapeAttr(data.viewBox)}"${attrs}>${prefixIds(data.body, id)}</symbol>`;
+}
+
+const INNER_ID_RE = /\bid="([^"]+)"/g;
+
+function prefixIds(body: string, prefix: string): string {
+  const ids = [...body.matchAll(INNER_ID_RE)].map((match) => match[1]);
+  let result = body;
+  for (const id of new Set(ids)) {
+    const escaped = escapeRegex(id);
+    result = result
+      .replaceAll(new RegExp(`\\bid="${escaped}"`, "g"), `id="${prefix}-${id}"`)
+      .replaceAll(new RegExp(`url\\(\\s*#${escaped}\\s*\\)`, "g"), `url(#${prefix}-${id})`)
+      .replaceAll(new RegExp(`href="#${escaped}"`, "g"), `href="#${prefix}-${id}"`);
+  }
+  return result;
 }
 
 function escapeAttr(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
+function escapeRegex(value: string): string {
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function buildRegistry(names: string[]): string {
