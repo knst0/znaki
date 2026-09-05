@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import type { EnvironmentModuleNode, Plugin } from "vite";
@@ -73,9 +73,9 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
   function collectDir(dir: string, warn: (msg: string) => void): void {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      if (entry.name === "node_modules" || entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
       const full = resolve(dir, entry.name);
-      if (statSync(full).isDirectory()) collectDir(full, warn);
+      if (entry.isDirectory()) collectDir(full, warn);
       else if (SOURCE_FILE_RE.test(entry.name)) record(full, readFileSync(full, "utf-8"), warn);
     }
   }
