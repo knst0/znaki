@@ -161,9 +161,19 @@ export default function znaki(options: ZnakiOptions): Plugin {
       const dynamicBefore = anyDynamic();
       record(id, code, (message) => this.warn(message));
 
-      if (this.environment.mode === "dev" && changed(before, spriteNames(), dynamicBefore, anyDynamic())) {
+      const after = spriteNames();
+      if (this.environment.mode === "dev" && changed(before, after, dynamicBefore, anyDynamic())) {
         spriteVersion += 1;
         invalidateVirtual(this.environment, dynamicBefore !== anyDynamic());
+      }
+
+      if (spriteRef) {
+        const late = [...after].filter((name) => !before.has(name));
+        if (late.length > 0) {
+          this.warn(
+            `znaki: ${late.map((name) => `"${name}"`).join(", ")} found in ${id} after the sprite was emitted — add its directory to "include"`,
+          );
+        }
       }
 
       return null;
