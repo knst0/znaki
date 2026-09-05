@@ -1,5 +1,6 @@
 import { parseSync } from "oxc-parser";
 import type {
+  CallExpression,
   Expression,
   JSXAttribute,
   JSXChild,
@@ -7,8 +8,10 @@ import type {
   JSXOpeningElement,
   MemberExpression,
   Node,
+  ParamPattern,
   Program,
   PropertyKey,
+  Statement,
 } from "oxc-parser";
 
 type Value =
@@ -40,13 +43,13 @@ export function scanIcons(code: string, component: string): ScanResult {
   } catch {
     return { names: ctx.names, dynamic: false };
   }
-  scan(program, collectModuleConsts(program), ctx);
+  scan(program, collectConsts(program.body, new Map()), ctx);
   return { names: ctx.names, dynamic: ctx.dynamic };
 }
 
-function collectModuleConsts(program: Program): Env {
-  const env = new Map<string, Value>();
-  for (const node of program.body) {
+function collectConsts(body: (Statement | Node)[], outer: Env): Env {
+  const env = new Map(outer);
+  for (const node of body) {
     const statement = node.type === "ExportNamedDeclaration" && node.declaration ? node.declaration : node;
     if (statement.type !== "VariableDeclaration" || statement.kind !== "const") continue;
     for (const declarator of statement.declarations) {
@@ -104,15 +107,33 @@ function evaluate(expr: Expression, env: Env): Value | null {
 
 const SKIPPED_KEYS = new Set(["type", "start", "end", "loc", "range", "parent"]);
 
+const ITERATION_METHODS = new Set(["map", "forEach", "flatMap", "filter", "find"]);
+
 function scan(node: Node, env: Env, ctx: Ctx): void {
   if (node.type === "JSXElement") {
     scanJsxElement(node, env, ctx);
     return;
   }
+  const scopeEnv = node.type === "BlockStatement" ? collectConsts(node.body, env) : env;
+  const childEnv = node.type === "CallExpression" ? withIterationParam(node, scopeEnv) : scopeEnv;
   for (const [key, value] of Object.entries(node as unknown as Record<string, unknown>)) {
     if (SKIPPED_KEYS.has(key)) continue;
-    scanValue(value, env, ctx);
+    scanValue(value, childEnv, ctx);
   }
+}
+
+function withIterationParam(node: CallExpression, env: Env): Env {
+  const callee = node.callee;
+  if (callee.type !== "MemberExpression" || callee.computed || callee.property.type !== "Identifier") return env;
+  if (!ITERATION_METHODS.has(callee.property.name)) return env;
+
+  const items = resolveMemberObject(callee.object, env);
+  const iteratee = node.arguments[0];
+  if (!items || iteratee?.type !== "ArrowFunctionExpression") return env;
+
+  const childEnv = new Map(env);
+  bindParam(iteratee.params[0], items, childEnv);
+  return childEnv;
 }
 
 function scanValue(value: unknown, env: Env, ctx: Ctx): void {
@@ -219,7 +240,10 @@ function resolveExpressionName(expr: Expression, env: Env): Set<string> | null {
 
 function bindForParam(child: JSXChild, eachValue: Value, env: Env): void {
   if (child.type !== "JSXExpressionContainer" || child.expression.type !== "ArrowFunctionExpression") return;
-  const param = child.expression.params[0];
+  bindParam(child.expression.params[0], eachValue, env);
+}
+
+function bindParam(param: ParamPattern | undefined, eachValue: Value, env: Env): void {
   if (!param) return;
   if (param.type === "Identifier") {
     env.set(param.name, eachValue);
