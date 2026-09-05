@@ -20,6 +20,16 @@ export function Icon(props: IconProps): JSX.Element {
   );
 }
 
+function reactAttrs(attrs: Record<string, string>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(attrs)) {
+    const camel =
+      key.startsWith("data-") || key.startsWith("aria-") ? key : key.replaceAll(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
+    result[camel] = value;
+  }
+  return result;
+}
+
 function IconShell({ name, size, ...rest }: IconProps): JSX.Element {
   const data: IconData | null = isSpriteName(name) ? null : use(loadIcon(name));
 
@@ -29,7 +39,7 @@ function IconShell({ name, size, ...rest }: IconProps): JSX.Element {
       height={size ?? "1em"}
       viewBox={data?.viewBox}
       aria-hidden={rest["aria-label"] ? undefined : "true"}
-      {...data?.attrs}
+      {...(data ? reactAttrs(data.attrs) : undefined)}
       {...rest}
     >
       {data ? <g dangerouslySetInnerHTML={{ __html: data.body }} /> : <use href={`${spriteUrl}#${symbolId(name)}`} />}
