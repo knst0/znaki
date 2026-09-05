@@ -57,7 +57,6 @@
     "changeset": "changeset",
     "fmt": "oxfmt",
     "lint": "oxlint --type-aware --type-check",
-    "release": "pnpm build && changeset publish",
     "test": "vitest",
     "test:matrix": "pnpm test:vite7 && pnpm test:vite8",
     "test:run": "vitest run",
