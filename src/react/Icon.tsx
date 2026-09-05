@@ -13,6 +13,8 @@ export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "dangerouslySet
 }
 
 export function Icon(props: IconProps): JSX.Element {
+  if (isSpriteName(props.name)) return <IconShell {...props} />;
+
   return (
     <Suspense fallback={null}>
       <IconShell {...props} />
