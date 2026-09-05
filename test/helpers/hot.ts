@@ -6,7 +6,7 @@ export interface HotHarness {
   invalidated: string[];
   warnings: string[];
   configResolved: () => void;
-  buildStart: () => void;
+  buildStart: () => Promise<void>;
   load: (id: string) => string | null;
   hotUpdate: (file: string, code: string) => Promise<unknown[]> | unknown[];
 }
@@ -44,8 +44,8 @@ export function createHotHarness({ root, sources, options = {} }: HotParams): Ho
   return {
     invalidated,
     warnings,
-    configResolved: () => call(plugin.configResolved, { root, base: "/" }),
-    buildStart: () => call(plugin.buildStart),
+    configResolved: () => call(plugin.configResolved, { root, base: "/", build: { outDir: "dist" } }),
+    buildStart: () => call<Promise<void>>(plugin.buildStart),
     load: (id) => call<string | null>(plugin.load, id),
     hotUpdate: (file, code) =>
       call<Promise<unknown[]> | unknown[]>(plugin.hotUpdate, {

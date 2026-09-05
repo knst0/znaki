@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { normalizePath } from "vite";
@@ -30,6 +31,7 @@ export type { IconSource } from "./source.ts";
 
 const SOURCE_FILE_RE = /\.[tj]sx$/;
 const DEV_SPRITE_PATH = "/@znaki/sprite.svg";
+const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "coverage", "storybook-static"]);
 
 export interface ZnakiOptions {
   sources: IconSource[];
@@ -37,6 +39,7 @@ export interface ZnakiOptions {
   dynamic?: string[];
   dts?: string | false;
   include?: string[];
+  exclude?: string[];
 }
 
 interface FileIcons {
@@ -52,6 +55,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
   const warned = new Set<string>();
 
   let dtsPath: string | false = false;
+  let excludedPaths = new Set<string>();
   let base = "/";
   let spriteRef: string | null = null;
   let spriteVersion = 0;
@@ -93,13 +97,17 @@ export default function znaki(options: ZnakiOptions): Plugin {
     else byFile.delete(id);
   }
 
-  function collectDir(dir: string, warn: (msg: string) => void): void {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name === "node_modules" || entry.name.startsWith(".") || entry.isSymbolicLink()) continue;
-      const full = normalizePath(resolve(dir, entry.name));
-      if (entry.isDirectory()) collectDir(full, warn);
-      else if (SOURCE_FILE_RE.test(entry.name)) record(full, readFileSync(full, "utf-8"), warn);
-    }
+  async function collectDir(dir: string, warn: (msg: string) => void): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true });
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (SKIPPED_DIRS.has(entry.name) || entry.name.startsWith(".") || entry.isSymbolicLink()) return;
+        const full = normalizePath(resolve(dir, entry.name));
+        if (excludedPaths.has(full)) return;
+        if (entry.isDirectory()) await collectDir(full, warn);
+        else if (SOURCE_FILE_RE.test(entry.name)) record(full, await readFile(full, "utf-8"), warn);
+      }),
+    );
   }
 
   return {
@@ -109,6 +117,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
     configResolved(config) {
       base = config.base;
       dtsPath = options.dts === false ? false : resolve(config.root, options.dts ?? "znaki.d.ts");
+      excludedPaths = new Set([config.build.outDir, ...(options.exclude ?? [])].map((dir) => normalizePath(resolve(config.root, dir))));
     },
 
     configureServer(server) {
@@ -123,7 +132,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
       });
     },
 
-    buildStart() {
+    async buildStart() {
       byFile.clear();
       warned.clear();
       registry.init(this.environment.config.root);
@@ -133,10 +142,12 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
       const root = this.environment.config.root;
       const warn = (message: string): void => this.warn(message);
-      for (const dir of options.include ?? [root]) {
-        const full = normalizePath(resolve(root, dir));
-        if (existsSync(full)) collectDir(full, warn);
-      }
+      await Promise.all(
+        (options.include ?? [root]).map(async (dir) => {
+          const full = normalizePath(resolve(root, dir));
+          if (existsSync(full)) await collectDir(full, warn);
+        }),
+      );
 
       for (const dir of registry.watchDirs) this.addWatchFile(dir);
 

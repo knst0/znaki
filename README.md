@@ -93,6 +93,10 @@ znaki({ sources: [tabler()], dynamic: ["tabler:arrow-", "tabler:home"] });
 | `dynamic`   | all names      | Names or prefixes reachable through the registry |
 | `dts`       | `"znaki.d.ts"` | Where to write the generated names, or `false`   |
 | `include`   | project root   | Directories to scan for icon usage               |
+| `exclude`   | —              | Extra directories to skip while scanning         |
+
+Scanning always skips `node_modules`, dot directories, `build.outDir` and the usual output
+directories (`dist`, `build`, `coverage`, `storybook-static`).
 
 ## License
 

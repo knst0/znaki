@@ -49,6 +49,17 @@ describe("project scanning", () => {
     expect(sprite).not.toContain("znaki-i-user");
   });
 
+  it("skips build output and excluded directories", async () => {
+    project.file("main.tsx", `export * from "virtual:znaki/sprite";`);
+    project.file(join("dist", "old.tsx"), `export const A = () => <Icon name="i:home" />;`);
+    project.file(join("vendor", "b.tsx"), `export const B = () => <Icon name="i:user" />;`);
+
+    const { sprite } = await bundle({ sources: [memorySource()], exclude: ["vendor"], dts: false });
+
+    expect(sprite).not.toContain("znaki-i-home");
+    expect(sprite).not.toContain("znaki-i-user");
+  });
+
   it("ignores a missing include directory", async () => {
     project.file("main.tsx", `export * from "virtual:znaki/sprite";`);
 
