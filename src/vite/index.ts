@@ -35,9 +35,10 @@ interface FileIcons {
 
 export default function znaki(options: ZnakiOptions): Plugin {
   const component = options.component ?? "Icon";
-  const componentRe = new RegExp(`<${component}\\b`);
+  const componentRe = new RegExp(`<${component.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
   const registry = new SourceRegistry(options.sources);
   const byFile = new Map<string, FileIcons>();
+  const warned = new Set<string>();
 
   let dtsPath: string | false = false;
   let base = "/";
@@ -66,7 +67,10 @@ export default function znaki(options: ZnakiOptions): Plugin {
     const names = new Set<string>();
     for (const name of found) {
       if (registry.resolve(name)) names.add(name);
-      else warn(`znaki: icon "${name}" not found in any configured source`);
+      else if (!warned.has(`${id}\0${name}`)) {
+        warned.add(`${id}\0${name}`);
+        warn(`znaki: icon "${name}" not found in any configured source`);
+      }
     }
     if (names.size > 0 || dynamic) byFile.set(id, { names, dynamic });
     else byFile.delete(id);
@@ -104,6 +108,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
     buildStart() {
       byFile.clear();
+      warned.clear();
       registry.init(this.environment.config.root);
       spriteRef = null;
 
@@ -185,6 +190,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
       if (fromSourceDir) {
         registry.invalidate();
+        warned.clear();
         if (dtsPath) writeDts(dtsPath, registry.names());
       }
 
