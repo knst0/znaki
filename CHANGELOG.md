@@ -1,5 +1,26 @@
 # znaki
 
+## 0.3.0
+
+### Minor Changes
+
+- ebb3f75: Skip `build.outDir` and the usual output directories while scanning the project, add an `exclude` option, and walk the file tree asynchronously.
+
+### Patch Changes
+
+- b00023d: Serve the dev sprite endpoint when a non-root `base` is configured.
+- 5ed92d0: Resolve icon names from `export const` declarations instead of treating them as dynamic.
+- 81a19ef: Normalize collected file paths and source directories so icon tracking and invalidation work on Windows.
+- 61af8f1: Prefix ids inside sprite symbols with the symbol id, so gradients and clip paths from different icons no longer collide.
+- 82c5d51: Convert hyphenated SVG attributes to camelCase in the React `Icon`, removing the invalid DOM property warnings for registry icons.
+- f28b8c8: Resolve icon names in `map`/`forEach`/`flatMap` callbacks over constant arrays and in constants declared inside functions, instead of falling back to the dynamic registry.
+- 2493b1e: Collect icons from every AST node, including arrays, objects, `switch`, `try`, classes, assignments and plain function calls.
+- f6a0aac: Render sprite icons in React without a `Suspense` boundary.
+- b8e722a: Skip symlinks while collecting source files, so link cycles and broken links no longer crash `buildStart`.
+- e809ef2: Declare the `xlink` namespace on the sprite root so icons using `xlink:href` no longer break the whole sprite.
+- 8a9ad88: Warn once per file and icon about unresolved names, and escape regex characters in the `component` option.
+- 87beae3: Warn during build when an icon is discovered after the sprite has already been emitted.
+
 ## 0.2.0
 
 ### Minor Changes
