@@ -46,7 +46,8 @@ export function scanIcons(code: string, component: string): ScanResult {
 
 function collectModuleConsts(program: Program): Env {
   const env = new Map<string, Value>();
-  for (const statement of program.body) {
+  for (const node of program.body) {
+    const statement = node.type === "ExportNamedDeclaration" && node.declaration ? node.declaration : node;
     if (statement.type !== "VariableDeclaration" || statement.kind !== "const") continue;
     for (const declarator of statement.declarations) {
       if (declarator.id.type !== "Identifier" || !declarator.init) continue;
