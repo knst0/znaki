@@ -85,16 +85,25 @@ describe("virtual:znaki/registry", () => {
     project.file("main.tsx", `export * from "virtual:znaki/registry";\nexport const C = () => <Icon name="i:home" />;`);
 
     const { chunk } = await bundle({ sources: [memorySource()], dts: false });
-    expect(chunk).toMatch(/registry\s*=\s*\{\s*\}/);
+    expect(chunk).toMatch(/shards\s*=\s*\{\s*\}/);
   });
 
-  it("lists every source icon when a dynamic usage exists", async () => {
+  it("lists a shard per icon group when a dynamic usage exists", async () => {
     project.file("main.tsx", `export * from "virtual:znaki/registry";\nexport const C = (p) => <Icon name={p.name} />;`);
 
     const { chunk } = await bundle({ sources: [memorySource()], dts: false });
 
-    expect(chunk).toContain('"i:home"');
-    expect(chunk).toContain('"i:user"');
+    expect(chunk).toContain('"i-ho"');
+    expect(chunk).toContain('"i-us"');
+  });
+
+  it("limits the shards to the dynamic allowlist", async () => {
+    project.file("main.tsx", `export * from "virtual:znaki/registry";\nexport const C = (p) => <Icon name={p.name} />;`);
+
+    const { chunk } = await bundle({ sources: [memorySource()], dynamic: ["i:home"], dts: false });
+
+    expect(chunk).toContain('"i-ho"');
+    expect(chunk).not.toContain('"i-us"');
   });
 });
 

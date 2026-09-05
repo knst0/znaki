@@ -4,10 +4,20 @@ import { resolve } from "node:path";
 import { normalizePath } from "vite";
 import type { EnvironmentModuleNode, Plugin } from "vite";
 
-import { symbolId } from "../id.ts";
+import { shardKey, symbolId } from "../id.ts";
 import type { IconData } from "../types.ts";
 import { writeDts } from "./dts.ts";
-import { ICON_PREFIX_RESOLVED, iconId, iconName, REGISTRY_ID, REGISTRY_RESOLVED, SPRITE_ID, SPRITE_RESOLVED } from "./ids.ts";
+import {
+  ICON_PREFIX_RESOLVED,
+  iconName,
+  REGISTRY_ID,
+  REGISTRY_RESOLVED,
+  SHARD_PREFIX_RESOLVED,
+  shardId,
+  shardName,
+  SPRITE_ID,
+  SPRITE_RESOLVED,
+} from "./ids.ts";
 import { scanIcons } from "./scan.ts";
 import type { IconSource } from "./source.ts";
 import { SourceRegistry } from "./source.ts";
@@ -24,6 +34,7 @@ const DEV_SPRITE_PATH = "/@znaki/sprite.svg";
 export interface ZnakiOptions {
   sources: IconSource[];
   component?: string;
+  dynamic?: string[];
   dts?: string | false;
   include?: string[];
 }
@@ -51,6 +62,12 @@ export default function znaki(options: ZnakiOptions): Plugin {
       for (const name of file.names) names.add(name);
     }
     return names;
+  }
+
+  function dynamicNames(): string[] {
+    const allowed = options.dynamic;
+    if (!allowed) return registry.names();
+    return registry.names().filter((name) => allowed.some((entry) => name === entry || name.startsWith(entry)));
   }
 
   function anyDynamic(): boolean {
@@ -131,7 +148,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
     resolveId(id) {
       if (id === SPRITE_ID) return SPRITE_RESOLVED;
       if (id === REGISTRY_ID) return REGISTRY_RESOLVED;
-      if (id.startsWith("virtual:znaki/icon/")) return `\0${id}`;
+      if (id.startsWith("virtual:znaki/icon/") || id.startsWith("virtual:znaki/shard/")) return `\0${id}`;
       return null;
     },
 
@@ -151,7 +168,14 @@ export default function znaki(options: ZnakiOptions): Plugin {
         }
         return `export const spriteUrl = ${url};\nexport const staticNames = new Set([${names}]);\n`;
       }
-      if (id === REGISTRY_RESOLVED) return buildRegistry(anyDynamic() ? registry.names() : []);
+      if (id === REGISTRY_RESOLVED) return buildRegistry(anyDynamic() ? dynamicNames() : []);
+      if (id.startsWith(SHARD_PREFIX_RESOLVED)) {
+        const key = shardName(id);
+        return buildShard(
+          registry,
+          dynamicNames().filter((name) => shardKey(name) === key),
+        );
+      }
       if (id.startsWith(ICON_PREFIX_RESOLVED)) {
         const data = registry.resolve(iconName(id));
         return data ? `export default ${JSON.stringify(data)};\n` : null;
@@ -289,6 +313,17 @@ function escapeRegex(value: string): string {
 }
 
 function buildRegistry(names: string[]): string {
-  const lines = names.map((name) => `  ${JSON.stringify(name)}: () => import(${JSON.stringify(iconId(name))}),`);
-  return `export const registry = {\n${lines.join("\n")}\n};\n`;
+  const keys = [...new Set(names.map((name) => shardKey(name)))].sort();
+  const lines = keys.map((key) => `  ${JSON.stringify(key)}: () => import(${JSON.stringify(shardId(key))}),`);
+  return `export const shards = {\n${lines.join("\n")}\n};\n`;
+}
+
+function buildShard(registry: SourceRegistry, names: string[]): string {
+  const entries = names
+    .map((name) => {
+      const data = registry.resolve(name);
+      return data ? `  ${JSON.stringify(name)}: ${JSON.stringify(data)},` : "";
+    })
+    .filter(Boolean);
+  return `export default {\n${entries.join("\n")}\n};\n`;
 }

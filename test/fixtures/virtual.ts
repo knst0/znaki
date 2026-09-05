@@ -5,6 +5,6 @@ export const staticNames = new Set(["i:sprited"]);
 
 export const lazyIcon: IconData = { body: "<circle r='1'/>", viewBox: "0 0 32 32", attrs: { fill: "red" } };
 
-export const registry: Record<string, () => Promise<{ default: IconData }>> = {
-  "i:lazy": () => Promise.resolve({ default: lazyIcon }),
+export const shards: Record<string, () => Promise<{ default: Record<string, IconData> }>> = {
+  "i-la": () => Promise.resolve({ default: { "i:lazy": lazyIcon } }),
 };

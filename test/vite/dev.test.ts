@@ -108,7 +108,7 @@ describe("dev registry", () => {
     project.file("main.tsx", `export const C = () => <Icon name="i:home" />;`);
     const dev = await start();
 
-    expect(await dev.transform("virtual:znaki/registry")).toMatch(/registry\s*=\s*\{\s*\}/);
+    expect(await dev.transform("virtual:znaki/registry")).toMatch(/shards\s*=\s*\{\s*\}/);
   });
 
   it("fills in once a dynamic usage appears", async () => {
@@ -116,7 +116,9 @@ describe("dev registry", () => {
     const dev = await start();
 
     const code = await dev.transform("virtual:znaki/registry");
-    expect(code).toContain('"i:home"');
-    expect(code).toContain('"i:user"');
+    expect(code).toContain('"i-ho"');
+    expect(code).toContain('"i-us"');
+
+    expect(await dev.transform("virtual:znaki/shard/i-ho")).toContain('"i:home"');
   });
 });

@@ -1,5 +1,6 @@
 import { staticNames } from "virtual:znaki/sprite";
 import type { IconData, IconName } from "znaki";
+import { shardKey } from "znaki";
 
 let registryPromise: Promise<typeof import("virtual:znaki/registry")> | null = null;
 const cache = new Map<IconName, Promise<IconData | null>>();
@@ -19,6 +20,6 @@ export function loadIcon(name: IconName): Promise<IconData | null> {
 
 async function resolveIcon(name: IconName): Promise<IconData | null> {
   registryPromise ??= import("virtual:znaki/registry");
-  const load = (await registryPromise).registry[name];
-  return load ? (await load()).default : null;
+  const load = (await registryPromise).shards[shardKey(name)];
+  return load ? ((await load()).default[name] ?? null) : null;
 }

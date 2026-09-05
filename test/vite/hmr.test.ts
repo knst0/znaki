@@ -53,7 +53,7 @@ describe("hotUpdate: source files", () => {
     await h.hotUpdate(join(project.root, "main.tsx"), `export const C = (p) => <Icon name={p.n} />;`);
 
     expect(h.invalidated).toContain("\0virtual:znaki/registry");
-    expect(h.load("\0virtual:znaki/registry")).toContain('"local:home"');
+    expect(h.load("\0virtual:znaki/registry")).toContain('"local-ho"');
   });
 
   it("removes icons when a file stops using the component", async () => {

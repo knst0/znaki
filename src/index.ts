@@ -1,4 +1,4 @@
-export { symbolId } from "./id.ts";
+export { shardKey, symbolId } from "./id.ts";
 export type { IconData } from "./types.ts";
 
 export interface IconNameMap {}

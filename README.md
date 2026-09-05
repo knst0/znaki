@@ -75,16 +75,24 @@ Icons become `<symbol>`s in a single hashed `znaki-sprite.svg` asset, referenced
 whole set.
 
 Names that cannot be resolved statically (a variable that is not a compile-time constant) fall
-back to a lazily imported registry, so they still work at the cost of a dynamic import.
+back to a lazily imported registry, so they still work at the cost of a dynamic import. The
+registry is split into shards grouped by source prefix and the first two characters of the name,
+so one dynamic usage pulls in a small chunk instead of a chunk per icon. Narrow it further with
+`dynamic`, an allowlist of names or name prefixes:
+
+```ts
+znaki({ sources: [tabler()], dynamic: ["tabler:arrow-", "tabler:home"] });
+```
 
 ## Options
 
-| Option      | Default        | Description                                    |
-| ----------- | -------------- | ---------------------------------------------- |
-| `sources`   | —              | Icon sources, resolved in order                |
-| `component` | `"Icon"`       | JSX tag name the scanner looks for             |
-| `dts`       | `"znaki.d.ts"` | Where to write the generated names, or `false` |
-| `include`   | project root   | Directories to scan for icon usage             |
+| Option      | Default        | Description                                      |
+| ----------- | -------------- | ------------------------------------------------ |
+| `sources`   | —              | Icon sources, resolved in order                  |
+| `component` | `"Icon"`       | JSX tag name the scanner looks for               |
+| `dynamic`   | all names      | Names or prefixes reachable through the registry |
+| `dts`       | `"znaki.d.ts"` | Where to write the generated names, or `false`   |
+| `include`   | project root   | Directories to scan for icon usage               |
 
 ## License
 
