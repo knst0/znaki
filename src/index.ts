@@ -1,5 +1,5 @@
 export { symbolId } from "./id.ts";
-export type { IconData, IconMode } from "./types.ts";
+export type { IconData } from "./types.ts";
 
 export interface IconNameMap {}
 

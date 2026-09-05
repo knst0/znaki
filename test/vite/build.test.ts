@@ -59,50 +59,17 @@ describe("virtual:znaki/sprite", () => {
     expect((await bundle({ sources: [memorySource()], dts: false })).sprite).toBe(EMPTY_SPRITE);
   });
 
-  it("excludes inline-mode icons from the sprite", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";\nexport const C = () => <Icon name="i:home" />;`);
-
-    expect((await bundle({ sources: [memorySource("inline")], dts: false })).sprite).toBe(EMPTY_SPRITE);
-  });
-
-  it("uses the plugin mode option as the default", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";\nexport const C = () => <Icon name="i:home" />;`);
-
-    const { sprite } = await bundle({ sources: [memorySource()], mode: "inline", dts: false });
-    expect(sprite).toBe(EMPTY_SPRITE);
-  });
-});
-
-describe("inline transform", () => {
-  it("injects a data prop and an icon import for inline icons", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="i:home" />;`);
-
-    const { chunk } = await bundle({ sources: [memorySource("inline")], dts: false });
-
-    expect(chunk).toContain(`M1 1`);
-    expect(chunk).toContain(`"viewBox": "0 0 16 16"`);
-    expect(chunk).toMatch(/data:\s*__znaki_0/);
-  });
-
-  it("reuses one binding for repeated icons", async () => {
-    project.file("main.tsx", `export const C = () => <><Icon name="i:home" /><Icon name="i:home" /></>;`);
-
-    const { chunk } = await bundle({ sources: [memorySource("inline")], dts: false });
-
-    expect(chunk.match(/M1 1/g)).toHaveLength(1);
-  });
-
-  it("leaves sprite icons untransformed", async () => {
+  it("leaves the source code untransformed", async () => {
     project.file("main.tsx", `export const C = () => <Icon name="i:home" />;`);
 
     expect((await bundle({ sources: [memorySource()], dts: false })).chunk).not.toContain("M1 1");
   });
 
-  it("respects a custom component name", async () => {
-    project.file("main.tsx", `export const C = () => <MyIcon name="i:home" />;`);
+  it("collects icons from a custom component name", async () => {
+    project.file("main.tsx", `export * from "virtual:znaki/sprite";\nexport const C = () => <MyIcon name="i:home" />;`);
 
-    const { chunk } = await bundle({ sources: [memorySource("inline")], component: "MyIcon", dts: false });
-    expect(chunk).toContain("M1 1");
+    const { sprite } = await bundle({ sources: [memorySource()], component: "MyIcon", dts: false });
+    expect(sprite).toContain("znaki-i-home");
   });
 
   it("ignores the default component name when a custom one is configured", async () => {

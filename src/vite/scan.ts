@@ -21,34 +21,27 @@ type Value =
 
 type Env = Map<string, Value>;
 
-export interface IconSite {
-  name: string;
-  insertPos: number;
-}
-
 export interface ScanResult {
   names: Set<string>;
-  sites: IconSite[];
   dynamic: boolean;
 }
 
 interface Ctx {
   names: Set<string>;
-  sites: IconSite[];
   dynamic: boolean;
   component: string;
 }
 
 export function scanIcons(code: string, component: string): ScanResult {
-  const ctx: Ctx = { names: new Set(), sites: [], dynamic: false, component };
+  const ctx: Ctx = { names: new Set(), dynamic: false, component };
   let program: Program;
   try {
     program = parseSync("component.tsx", code, { lang: "tsx", sourceType: "module", preserveParens: false }).program;
   } catch {
-    return { names: ctx.names, sites: ctx.sites, dynamic: false };
+    return { names: ctx.names, dynamic: false };
   }
   scan(program, collectModuleConsts(program), ctx);
-  return { names: ctx.names, sites: ctx.sites, dynamic: ctx.dynamic };
+  return { names: ctx.names, dynamic: ctx.dynamic };
 }
 
 function collectModuleConsts(program: Program): Env {
@@ -192,9 +185,6 @@ function scanJsxElement(element: JSXElement, env: Env, ctx: Ctx): void {
 
     if (resolved) {
       for (const name of resolved) ctx.names.add(name);
-      if (resolved.size === 1 && !findAttribute(attributes, "data")) {
-        ctx.sites.push({ name: [...resolved][0], insertPos: opening.name.end });
-      }
     } else if (nameAttribute?.value) {
       ctx.dynamic = true;
     }

@@ -3,5 +3,3 @@ export interface IconData {
   viewBox: string;
   attrs: Record<string, string>;
 }
-
-export type IconMode = "sprite" | "inline";

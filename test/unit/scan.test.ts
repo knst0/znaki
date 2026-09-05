@@ -40,7 +40,6 @@ describe("scanIcons: literal names", () => {
   it("returns nothing on a parse error", () => {
     const result = scanIcons("const = = =;", "Icon");
     expect([...result.names]).toEqual([]);
-    expect(result.sites).toEqual([]);
     expect(result.dynamic).toBe(false);
   });
 });
@@ -173,36 +172,5 @@ describe("scanIcons: For bindings", () => {
     const result = scanIcons(code, "Icon");
     expect([...result.names]).toEqual(["a"]);
     expect(result.dynamic).toBe(true);
-  });
-});
-
-describe("scanIcons: inline sites", () => {
-  it("reports one site per statically named usage", () => {
-    const code = `const a = () => <Icon name="home" />;`;
-    const { sites } = scanIcons(code, "Icon");
-
-    expect(sites).toHaveLength(1);
-    expect(sites[0].name).toBe("home");
-    expect(code.slice(sites[0].insertPos)).toBe(` name="home" />;`);
-  });
-
-  it("reports a site per occurrence, in source order", () => {
-    const { sites } = scanIcons(`const a = () => <><Icon name="a" /><Icon name="b" /></>;`, "Icon");
-    expect(sites.map((site) => site.name)).toEqual(["a", "b"]);
-    expect(sites[0].insertPos).toBeLessThan(sites[1].insertPos);
-  });
-
-  it("skips sites that already have a data prop", () => {
-    expect(scanIcons(`const a = (p) => <Icon name="home" data={p.d} />;`, "Icon").sites).toEqual([]);
-  });
-
-  it("skips ambiguous multi-name sites but still collects names", () => {
-    const result = scanIcons(`const a = (p) => <Icon name={p.x ? "a" : "b"} />;`, "Icon");
-    expect([...result.names].sort()).toEqual(["a", "b"]);
-    expect(result.sites).toEqual([]);
-  });
-
-  it("reports no sites for dynamic names", () => {
-    expect(scanIcons(`const a = (p) => <Icon name={p.name} />;`, "Icon").sites).toEqual([]);
   });
 });

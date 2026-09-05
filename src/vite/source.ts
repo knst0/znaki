@@ -1,28 +1,20 @@
-import type { IconData, IconMode } from "../types.ts";
+import type { IconData } from "../types.ts";
 
 export interface IconSource {
   prefix: string;
   init?: (root: string) => void;
-  mode?: IconMode;
   dirs: string[];
   list: () => string[];
   load: (name: string) => IconData | null;
 }
 
-export interface ResolvedIcon {
-  data: IconData;
-  mode: IconMode;
-}
-
 export class SourceRegistry {
   #sources: IconSource[];
-  #defaultMode: IconMode;
-  #cache = new Map<string, ResolvedIcon | null>();
+  #cache = new Map<string, IconData | null>();
   #names: string[] | null = null;
 
-  constructor(sources: IconSource[], defaultMode: IconMode) {
+  constructor(sources: IconSource[]) {
     this.#sources = sources;
-    this.#defaultMode = defaultMode;
   }
 
   get watchDirs(): string[] {
@@ -39,17 +31,17 @@ export class SourceRegistry {
     this.#names = null;
   }
 
-  resolve(fullName: string): ResolvedIcon | null {
+  resolve(fullName: string): IconData | null {
     const cached = this.#cache.get(fullName);
     if (cached !== undefined) return cached;
 
-    let resolved: ResolvedIcon | null = null;
+    let resolved: IconData | null = null;
     for (const source of this.#sources) {
       const local = strip(fullName, source.prefix);
       if (local === null) continue;
       const data = source.load(local);
       if (data) {
-        resolved = { data, mode: source.mode ?? this.#defaultMode };
+        resolved = data;
         break;
       }
     }

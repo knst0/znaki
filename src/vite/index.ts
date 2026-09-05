@@ -1,11 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
-import MagicString from "magic-string";
 import type { EnvironmentModuleNode, Plugin } from "vite";
 
 import { symbolId } from "../id.ts";
-import type { IconData, IconMode } from "../types.ts";
+import type { IconData } from "../types.ts";
 import { writeDts } from "./dts.ts";
 import { ICON_PREFIX_RESOLVED, iconId, iconName, REGISTRY_ID, REGISTRY_RESOLVED, SPRITE_ID, SPRITE_RESOLVED } from "./ids.ts";
 import { scanIcons } from "./scan.ts";
@@ -23,7 +22,6 @@ const DEV_SPRITE_PATH = "/@znaki/sprite.svg";
 
 export interface ZnakiOptions {
   sources: IconSource[];
-  mode?: IconMode;
   component?: string;
   dts?: string | false;
   include?: string[];
@@ -37,7 +35,7 @@ interface FileIcons {
 export default function znaki(options: ZnakiOptions): Plugin {
   const component = options.component ?? "Icon";
   const componentRe = new RegExp(`<${component}\\b`);
-  const registry = new SourceRegistry(options.sources, options.mode ?? "sprite");
+  const registry = new SourceRegistry(options.sources);
   const byFile = new Map<string, FileIcons>();
 
   let dtsPath: string | false = false;
@@ -48,9 +46,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
   function spriteNames(): Set<string> {
     const names = new Set<string>();
     for (const file of byFile.values()) {
-      for (const name of file.names) {
-        if (registry.resolve(name)?.mode === "sprite") names.add(name);
-      }
+      for (const name of file.names) names.add(name);
     }
     return names;
   }
@@ -147,7 +143,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
       }
       if (id === REGISTRY_RESOLVED) return buildRegistry(anyDynamic() ? registry.names() : []);
       if (id.startsWith(ICON_PREFIX_RESOLVED)) {
-        const data = registry.resolve(iconName(id))?.data;
+        const data = registry.resolve(iconName(id));
         return data ? `export default ${JSON.stringify(data)};\n` : null;
       }
       return null;
@@ -165,7 +161,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
         invalidateVirtual(this.environment, dynamicBefore !== anyDynamic());
       }
 
-      return inlineTransform(code, component, registry);
+      return null;
     },
 
     hotUpdate({ file, read, modules }) {
@@ -223,46 +219,10 @@ function invalidateVirtual(
   return affected;
 }
 
-function inlineTransform(code: string, component: string, registry: SourceRegistry): { code: string; map: null } | null {
-  const { sites } = scanIcons(code, component);
-  const inlineSites = sites.filter((site) => registry.resolve(site.name)?.mode === "inline");
-  if (inlineSites.length === 0) return null;
-
-  const s = new MagicString(code);
-  const bindings = new Map<string, string>();
-  const declarations: string[] = [];
-
-  for (const site of inlineSites) {
-    let binding = bindings.get(site.name);
-    if (!binding) {
-      binding = `__znaki_${bindings.size}`;
-      bindings.set(site.name, binding);
-      const data = registry.resolve(site.name)?.data;
-      if (data) declarations.push(`const ${binding} = ${iconLiteral(data)};`);
-    }
-    s.appendLeft(site.insertPos, ` data={${binding}}`);
-  }
-
-  s.prepend(`${declarations.join("\n")}\n`);
-
-  return { code: s.toString(), map: null };
-}
-
-function iconLiteral(data: IconData): string {
-  const attrs = Object.entries(data.attrs)
-    .map(([key, value]) => `${JSON.stringify(key)}: ${stringLiteral(value)}`)
-    .join(", ");
-  return `{ "body": ${stringLiteral(data.body)}, "viewBox": ${stringLiteral(data.viewBox)}, "attrs": { ${attrs} } }`;
-}
-
-function stringLiteral(value: string): string {
-  return value.includes('"') && !value.includes("'") && !value.includes("\\") ? `'${value}'` : JSON.stringify(value);
-}
-
 function spriteMarkup(registry: SourceRegistry, names: Set<string>): string {
   const symbols = [...names]
     .map((name) => {
-      const data = registry.resolve(name)?.data;
+      const data = registry.resolve(name);
       return data ? symbolMarkup(name, data) : "";
     })
     .join("");

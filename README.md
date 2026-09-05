@@ -1,8 +1,7 @@
 # znaki
 
 Typesafe SVG icons for Vite. Collects the icons you actually use at build time, ships them as
-an external sprite or inlines them into the bundle, and generates a union type of every
-available icon name.
+an external sprite, and generates a union type of every available icon name.
 
 ## Install
 
@@ -21,7 +20,7 @@ import znaki, { local, tabler } from "znaki/vite";
 export default defineConfig({
   plugins: [
     znaki({
-      sources: [tabler(), local({ dir: "src/icons", mode: "inline" })],
+      sources: [tabler(), local({ dir: "src/icons" })],
     }),
   ],
 });
@@ -69,15 +68,11 @@ Icon names are `<prefix>:<name>`. Pass `prefix: ""` to a source to use bare name
 Sources are resolved in order, so an earlier source wins on a name collision. A custom source is
 just an object implementing `IconSource`.
 
-## Modes
+## Delivery
 
-`mode` is set globally and can be overridden per source.
-
-- `sprite` (default) — icons become `<symbol>`s in a single hashed `znaki-sprite.svg` asset,
-  referenced with `<use href="/assets/znaki-sprite-<hash>.svg#znaki-tabler-home">`. One cacheable
-  request for the whole set.
-- `inline` — the icon markup is injected into the JSX at build time and bundled with the code.
-  No extra request, best for a handful of critical icons such as a logo.
+Icons become `<symbol>`s in a single hashed `znaki-sprite.svg` asset, referenced with
+`<use href="/assets/znaki-sprite-<hash>.svg#znaki-tabler-home">`. One cacheable request for the
+whole set.
 
 Names that cannot be resolved statically (a variable that is not a compile-time constant) fall
 back to a lazily imported registry, so they still work at the cost of a dynamic import.
@@ -87,7 +82,6 @@ back to a lazily imported registry, so they still work at the cost of a dynamic 
 | Option      | Default        | Description                                    |
 | ----------- | -------------- | ---------------------------------------------- |
 | `sources`   | —              | Icon sources, resolved in order                |
-| `mode`      | `"sprite"`     | Default delivery mode                          |
 | `component` | `"Icon"`       | JSX tag name the scanner looks for             |
 | `dts`       | `"znaki.d.ts"` | Where to write the generated names, or `false` |
 | `include`   | project root   | Directories to scan for icon usage             |

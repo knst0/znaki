@@ -1,14 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { posix, resolve } from "node:path";
 
-import type { IconData, IconMode } from "../../types.ts";
+import type { IconData } from "../../types.ts";
 import type { IconSource } from "../source.ts";
 import { parseSvg } from "../svg.ts";
 
 export interface LocalOptions {
   dir: string;
   prefix?: string;
-  mode?: IconMode;
 }
 
 export function local(options: LocalOptions): IconSource {
@@ -19,7 +18,6 @@ export function local(options: LocalOptions): IconSource {
     init: (root: string) => {
       dir = resolve(root, options.dir);
     },
-    mode: options.mode,
     get dirs(): string[] {
       return [dir];
     },

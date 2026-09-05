@@ -109,9 +109,6 @@ importers:
 
   .:
     dependencies:
-      magic-string:
-        specifier: ^1.2.3
-        version: 1.2.3
       oxc-parser:
         specifier: ^0.148.0
         version: 0.148.0

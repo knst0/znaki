@@ -12,16 +12,12 @@ const project = useProject("znaki-src");
 const icon = (relative: string, content = SVG_ATTRS) => project.file(relative, content);
 
 describe("local source", () => {
-  it("defaults to the local prefix and inherits no mode", () => {
-    const source = local({ dir: project.root });
-    expect(source.prefix).toBe("local");
-    expect(source.mode).toBeUndefined();
+  it("defaults to the local prefix", () => {
+    expect(local({ dir: project.root }).prefix).toBe("local");
   });
 
-  it("honours prefix and mode options", () => {
-    const source = local({ dir: project.root, prefix: "app", mode: "inline" });
-    expect(source.prefix).toBe("app");
-    expect(source.mode).toBe("inline");
+  it("honours the prefix option", () => {
+    expect(local({ dir: project.root, prefix: "app" }).prefix).toBe("app");
   });
 
   it("lists svg files without their extension", () => {
@@ -98,13 +94,10 @@ describe("tabler source", () => {
     const source = tabler();
     expect(source.prefix).toBe("tabler");
     expect(source.dirs).toEqual([]);
-    expect(source.mode).toBeUndefined();
   });
 
-  it("honours prefix and mode options", () => {
-    const source = tabler({ prefix: "tb", mode: "inline" });
-    expect(source.prefix).toBe("tb");
-    expect(source.mode).toBe("inline");
+  it("honours the prefix option", () => {
+    expect(tabler({ prefix: "tb" }).prefix).toBe("tb");
   });
 
   it("lists outline icons by default", () => {

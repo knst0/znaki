@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 
-import type { IconData, IconMode } from "../../types.ts";
+import type { IconData } from "../../types.ts";
 import type { IconSource } from "../source.ts";
 import { parseSvg } from "../svg.ts";
 
@@ -11,7 +11,6 @@ export type TablerVariant = "outline" | "filled";
 export interface TablerOptions {
   variant?: TablerVariant;
   prefix?: string;
-  mode?: IconMode;
 }
 
 const PROBE: Record<TablerVariant, string> = {
@@ -25,7 +24,6 @@ export function tabler(options: TablerOptions = {}): IconSource {
 
   return {
     prefix: options.prefix ?? "tabler",
-    mode: options.mode,
     dirs: [],
     list: () =>
       readdirSync(dir)
