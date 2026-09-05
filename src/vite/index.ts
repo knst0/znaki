@@ -90,7 +90,11 @@ export default function znaki(options: ZnakiOptions): Plugin {
     },
 
     configureServer(server) {
-      server.middlewares.use(DEV_SPRITE_PATH, (_request, response) => {
+      server.middlewares.use((request, response, next) => {
+        if (!isDevSpriteRequest(request.url, base)) {
+          next();
+          return;
+        }
         response.setHeader("Content-Type", "image/svg+xml");
         response.setHeader("Cache-Control", "no-cache");
         response.end(spriteMarkup(registry, spriteNames()));
@@ -191,6 +195,13 @@ export default function znaki(options: ZnakiOptions): Plugin {
       });
     },
   };
+}
+
+function isDevSpriteRequest(url: string | undefined, base: string): boolean {
+  if (!url) return false;
+  const path = url.split("?")[0];
+  const withBase = `${base.replace(/\/$/, "")}${DEV_SPRITE_PATH}`;
+  return path === DEV_SPRITE_PATH || path === withBase;
 }
 
 function changed(before: Set<string>, after: Set<string>, dynamicBefore: boolean, dynamicAfter: boolean): boolean {
