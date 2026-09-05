@@ -10,7 +10,7 @@ import type { ZnakiOptions } from "../helpers/build.ts";
 
 const project = useProject("znaki-build");
 
-const EMPTY_SPRITE = `<svg xmlns="http://www.w3.org/2000/svg"></svg>`;
+const EMPTY_SPRITE = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"></svg>`;
 
 const bundle = (options: ZnakiOptions, entry?: string) => buildProject({ root: project.root, options, entry });
 
@@ -24,7 +24,7 @@ describe("virtual:znaki/sprite", () => {
     const { sprite } = await bundle({ sources: [memorySource()], dts: false });
 
     expect(sprite).toBe(
-      `<svg xmlns="http://www.w3.org/2000/svg"><symbol id="znaki-i-home" viewBox="0 0 16 16" fill="none"><path d="M1 1"/></symbol></svg>`,
+      `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><symbol id="znaki-i-home" viewBox="0 0 16 16" fill="none"><path d="M1 1"/></symbol></svg>`,
     );
   });
 

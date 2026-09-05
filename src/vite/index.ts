@@ -237,7 +237,7 @@ function spriteMarkup(registry: SourceRegistry, names: Set<string>): string {
       return data ? symbolMarkup(name, data) : "";
     })
     .join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg">${symbols}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${symbols}</svg>`;
 }
 
 function symbolMarkup(name: string, data: IconData): string {
