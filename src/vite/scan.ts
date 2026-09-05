@@ -101,77 +101,29 @@ function evaluate(expr: Expression, env: Env): Value | null {
   }
 }
 
+const SKIPPED_KEYS = new Set(["type", "start", "end", "loc", "range", "parent"]);
+
 function scan(node: Node, env: Env, ctx: Ctx): void {
-  switch (node.type) {
-    case "Program":
-    case "BlockStatement":
-    case "StaticBlock":
-      for (const statement of node.body) scan(statement, env, ctx);
-      return;
-    case "ExportNamedDeclaration":
-    case "ExportDefaultDeclaration":
-      if (node.declaration) scan(node.declaration, env, ctx);
-      return;
-    case "ExpressionStatement":
-      if ("directive" in node) return;
-      scan(node.expression, env, ctx);
-      return;
-    case "ReturnStatement":
-    case "AwaitExpression":
-    case "YieldExpression":
-      if (node.argument) scan(node.argument, env, ctx);
-      return;
-    case "IfStatement":
-      scan(node.consequent, env, ctx);
-      if (node.alternate) scan(node.alternate, env, ctx);
-      return;
-    case "ForStatement":
-    case "ForInStatement":
-    case "ForOfStatement":
-    case "WhileStatement":
-    case "DoWhileStatement":
-      scan(node.body, env, ctx);
-      return;
-    case "VariableDeclaration":
-      for (const declarator of node.declarations) if (declarator.init) scan(declarator.init, env, ctx);
-      return;
-    case "ConditionalExpression":
-      scan(node.consequent, env, ctx);
-      scan(node.alternate, env, ctx);
-      return;
-    case "LogicalExpression":
-    case "BinaryExpression":
-      scan(node.left, env, ctx);
-      scan(node.right, env, ctx);
-      return;
-    case "SequenceExpression":
-      for (const expression of node.expressions) scan(expression, env, ctx);
-      return;
-    case "CallExpression":
-      if (node.callee.type === "ArrowFunctionExpression") scan(node.callee, env, ctx);
-      for (const argument of node.arguments) scan(argument, env, ctx);
-      return;
-    case "ArrowFunctionExpression":
-    case "FunctionExpression":
-    case "FunctionDeclaration":
-      if (node.body) scan(node.body, env, ctx);
-      return;
-    case "TSAsExpression":
-    case "TSSatisfiesExpression":
-      scan(node.expression, env, ctx);
-      return;
-    case "JSXElement":
-      scanJsxElement(node, env, ctx);
-      return;
-    case "JSXFragment":
-      for (const child of node.children) scan(child, env, ctx);
-      return;
-    case "JSXExpressionContainer":
-      if (node.expression.type !== "JSXEmptyExpression") scan(node.expression, env, ctx);
-      return;
-    default:
-      return;
+  if (node.type === "JSXElement") {
+    scanJsxElement(node, env, ctx);
+    return;
   }
+  for (const [key, value] of Object.entries(node as unknown as Record<string, unknown>)) {
+    if (SKIPPED_KEYS.has(key)) continue;
+    scanValue(value, env, ctx);
+  }
+}
+
+function scanValue(value: unknown, env: Env, ctx: Ctx): void {
+  if (Array.isArray(value)) {
+    for (const item of value) scanValue(item, env, ctx);
+    return;
+  }
+  if (isNode(value)) scan(value, env, ctx);
+}
+
+function isNode(value: unknown): value is Node {
+  return typeof value === "object" && value !== null && typeof (value as { type?: unknown }).type === "string";
 }
 
 function scanJsxElement(element: JSXElement, env: Env, ctx: Ctx): void {
