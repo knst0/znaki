@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tag the release commit and publish the GitHub release. Safe to re-run.
-# Expects TAG, DRAFT and GITHUB_TOKEN in the environment.
+# Expects TAG and GITHUB_TOKEN in the environment.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
@@ -14,7 +14,5 @@ if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1;
   git push origin "$TAG"
 fi
 
-args=(--title "$TAG" --notes-file RELEASE_NOTES.md)
-[ "${DRAFT:-false}" = true ] && args+=(--draft)
-
-gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" "${args[@]}"
+gh release view "$TAG" >/dev/null 2>&1 ||
+  gh release create "$TAG" --title "$TAG" --notes-file RELEASE_NOTES.md

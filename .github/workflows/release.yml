@@ -8,11 +8,6 @@ on:
         required: false
         type: boolean
         default: false
-      draft:
-        description: "Create the GitHub release as a draft"
-        required: false
-        type: boolean
-        default: false
 
 permissions: {}
 
@@ -126,13 +121,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          DRAFT: ${{ inputs.draft }}
         run: .github/scripts/github-release.sh
 
   sync-pr:
     name: Sync PR into main
     needs: [prepare, publish]
-    if: ${{ !inputs.dry-run && !inputs.draft }}
+    if: ${{ !inputs.dry-run }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -8,13 +8,6 @@ on:
         required: false
         type: string
         default: ""
-      linux-only:
-        description: >-
-          Run the cross-platform job on Linux alone. Use where the other
-          platforms were already covered before the commit under test.
-        required: false
-        type: boolean
-        default: false
 
 permissions: {}
 
@@ -24,14 +17,10 @@ defaults:
 
 jobs:
   check:
-    name: Check ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Check
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ inputs.linux-only && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -40,11 +29,9 @@ jobs:
       - uses: ./.github/actions/setup-node
 
       - name: Format
-        if: runner.os == 'Linux'
         run: pnpm fmt --check
 
       - name: Lint the release plumbing
-        if: runner.os == 'Linux'
         run: .github/scripts/changeset.sh status
 
       - name: Lint
@@ -60,7 +47,6 @@ jobs:
         run: pnpm build
 
       - name: Pack
-        if: runner.os == 'Linux'
         run: pnpm pack --pack-destination "$RUNNER_TEMP"
 
   audit:
