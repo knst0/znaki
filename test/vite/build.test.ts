@@ -88,8 +88,15 @@ describe("virtual:znaki/registry", () => {
     expect(chunk).toMatch(/shards\s*=\s*\{\s*\}/);
   });
 
-  it("lists a shard per icon group when a dynamic usage exists", async () => {
+  it("stays empty for a dynamic usage without runtime-built names", async () => {
     project.file("main.tsx", `export * from "virtual:znaki/registry";\nexport const C = (p) => <Icon name={p.name} />;`);
+
+    const { chunk } = await bundle({ sources: [memorySource()], dts: false });
+    expect(chunk).toMatch(/shards\s*=\s*\{\s*\}/);
+  });
+
+  it("lists a shard per icon group reachable through a template literal", async () => {
+    project.file("main.tsx", 'export * from "virtual:znaki/registry";\nexport const C = (p) => <Icon name={`i:${p.name}`} />;');
 
     const { chunk } = await bundle({ sources: [memorySource()], dts: false });
 
@@ -104,6 +111,48 @@ describe("virtual:znaki/registry", () => {
 
     expect(chunk).toContain('"i-ho"');
     expect(chunk).not.toContain('"i-us"');
+  });
+});
+
+describe("dynamic usage", () => {
+  it("adds icon name literals from any file to the sprite", async () => {
+    project.file("Button.tsx", `export const Button = (p) => <Icon name={p.icon} />;`);
+    project.file("main.tsx", `export * from "virtual:znaki/sprite";\nexport const C = () => <Button icon="i:user" label="i:nope" />;`);
+
+    const { sprite, chunk } = await bundle({ sources: [memorySource()], dts: false });
+
+    expect(sprite).toContain("znaki-i-user");
+    expect(sprite).not.toContain("znaki-i-home");
+    expect(chunk).toContain('new Set(["i:user"])');
+  });
+
+  it("ignores icon name literals while every usage is static", async () => {
+    project.file(
+      "main.tsx",
+      `export * from "virtual:znaki/sprite";\nexport const label = "i:user";\nexport const C = () => <Icon name="i:home" />;`,
+    );
+
+    const { sprite } = await bundle({ sources: [memorySource()], dts: false });
+    expect(sprite).not.toContain("znaki-i-user");
+  });
+
+  it("keeps sprite icons out of the registry", async () => {
+    project.file(
+      "main.tsx",
+      'export * from "virtual:znaki/registry";\nexport const home = "i:home";\nexport const C = (p) => <Icon name={`i:${p.name}`} />;',
+    );
+
+    const { chunk } = await bundle({ sources: [memorySource()], dts: false });
+
+    expect(chunk).not.toContain('"i-ho"');
+    expect(chunk).toContain('"i-us"');
+  });
+
+  it("does not warn about dynamic usage", async () => {
+    project.file("main.tsx", `export const C = (p) => <Icon name={p.name} />;`);
+
+    const { warnings } = await bundle({ sources: [memorySource()], dts: false });
+    expect(warnings.join("\n")).not.toContain("dynamic");
   });
 });
 

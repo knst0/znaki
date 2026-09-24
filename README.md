@@ -74,15 +74,23 @@ Icons become `<symbol>`s in a single hashed `znaki-sprite.svg` asset, referenced
 `<use href="/assets/znaki-sprite-<hash>.svg#znaki-tabler-home">`. One cacheable request for the
 whole set.
 
-Names that cannot be resolved statically (a variable that is not a compile-time constant) fall
-back to a lazily imported registry, so they still work at the cost of a dynamic import. The
-registry is split into shards grouped by source prefix and the first two characters of the name,
-so one dynamic usage pulls in a small chunk instead of a chunk per icon. Narrow it further with
-`dynamic`, an allowlist of names or name prefixes:
+Names that cannot be resolved statically — say a wrapper component that forwards
+`<Icon name={props.icon} />` — are still served from the sprite: once such a usage exists, every
+string literal in the scanned files that is a known icon name (`<Button icon="tabler:home" />`,
+`const ICON = "tabler:user"`) is added to the sprite as well.
+
+Only names built at runtime fall back to a lazily imported registry, at the cost of a dynamic
+import. A template literal with a static head (`` `tabler:arrow-${dir}` ``) makes every icon starting
+with that head reachable. Names from anywhere else (an API response, `"tabler:" + name`) need the
+`dynamic` option — an allowlist of names or name prefixes:
 
 ```ts
 znaki({ sources: [tabler()], dynamic: ["tabler:arrow-", "tabler:home"] });
 ```
+
+The registry is split into shards grouped by source prefix and the first two characters of the
+name, so one lookup pulls in a small chunk instead of a chunk per icon. Icons already in the
+sprite never end up in the registry.
 
 ## Options
 
@@ -90,7 +98,7 @@ znaki({ sources: [tabler()], dynamic: ["tabler:arrow-", "tabler:home"] });
 | ----------- | -------------- | ------------------------------------------------ |
 | `sources`   | —              | Icon sources, resolved in order                  |
 | `component` | `"Icon"`       | JSX tag name the scanner looks for               |
-| `dynamic`   | all names      | Names or prefixes reachable through the registry |
+| `dynamic`   | `[]`           | Names or prefixes reachable through the registry |
 | `dts`       | `"znaki.d.ts"` | Where to write the generated names, or `false`   |
 | `include`   | project root   | Directories to scan for icon usage               |
 | `exclude`   | —              | Extra directories to skip while scanning         |

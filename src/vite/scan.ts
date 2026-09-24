@@ -320,3 +320,22 @@ function propertyKeyName(key: PropertyKey): string | null {
   if (key.type === "Literal" && typeof key.value === "string") return key.value;
   return null;
 }
+
+export interface LiteralScan {
+  strings: Set<string>;
+  prefixes: Set<string>;
+}
+
+const STRING_RE = /(["'`])((?:(?!\1)[^\s\\$<>{}"'`])+)\1/g;
+const TEMPLATE_PREFIX_RE = /`([^\s\\$`]+)\$\{/g;
+
+// Icon names that reach a dynamic <Icon name={...}> through props or state still start out as
+// string literals somewhere in the project, and runtime-built names as template literals with a
+// static head. Both are collected with a cheap lexical pass over every source file.
+export function scanLiterals(code: string): LiteralScan {
+  const strings = new Set<string>();
+  const prefixes = new Set<string>();
+  for (const match of code.matchAll(STRING_RE)) strings.add(match[2]);
+  for (const match of code.matchAll(TEMPLATE_PREFIX_RE)) prefixes.add(match[1]);
+  return { strings, prefixes };
+}

@@ -50,10 +50,21 @@ describe("hotUpdate: source files", () => {
     project.file("main.tsx", `export const C = () => <Icon name="local:home" />;`);
     const h = await harness();
 
-    await h.hotUpdate(join(project.root, "main.tsx"), `export const C = (p) => <Icon name={p.n} />;`);
+    await h.hotUpdate(join(project.root, "main.tsx"), "export const C = (p) => <Icon name={`local:${p.n}`} />;");
 
     expect(h.invalidated).toContain("\0virtual:znaki/registry");
     expect(h.load("\0virtual:znaki/registry")).toContain('"local-ho"');
+  });
+
+  it("adds icon literals from a file without the component once usage is dynamic", async () => {
+    project.file("Button.tsx", `export const Button = (p) => <Icon name={p.icon} />;`);
+    project.file("main.tsx", `export const C = () => <div />;`);
+    const h = await harness();
+
+    await h.hotUpdate(join(project.root, "main.tsx"), `export const C = () => <Button icon="local:home" />;`);
+
+    expect(h.invalidated).toContain("\0virtual:znaki/sprite");
+    expect(h.load("\0virtual:znaki/sprite")).toContain('"local:home"');
   });
 
   it("removes icons when a file stops using the component", async () => {

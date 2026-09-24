@@ -12,6 +12,7 @@ export class SourceRegistry {
   #sources: IconSource[];
   #cache = new Map<string, IconData | null>();
   #names: string[] | null = null;
+  #nameSet: Set<string> | null = null;
 
   constructor(sources: IconSource[]) {
     this.#sources = sources;
@@ -29,6 +30,12 @@ export class SourceRegistry {
   invalidate(): void {
     this.#cache.clear();
     this.#names = null;
+    this.#nameSet = null;
+  }
+
+  has(fullName: string): boolean {
+    this.#nameSet ??= new Set(this.names());
+    return this.#nameSet.has(fullName);
   }
 
   resolve(fullName: string): IconData | null {
