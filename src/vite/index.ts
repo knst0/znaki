@@ -19,7 +19,7 @@ import {
   SPRITE_ID,
   SPRITE_RESOLVED,
 } from "./ids.ts";
-import { scanIcons } from "./scan.ts";
+import { scanIcons, scanLiterals } from "./scan.ts";
 import type { IconSource } from "./source.ts";
 import { SourceRegistry } from "./source.ts";
 
@@ -44,6 +44,8 @@ export interface ZnakiOptions {
 
 interface FileIcons {
   names: Set<string>;
+  literals: Set<string>;
+  prefixes: Set<string>;
   dynamic: boolean;
 }
 
@@ -53,6 +55,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
   const registry = new SourceRegistry(options.sources);
   const byFile = new Map<string, FileIcons>();
   const warned = new Set<string>();
+  const loadedShards = new Set<string>();
 
   let dtsPath: string | false = false;
   let excludedPaths = new Set<string>();
@@ -61,17 +64,32 @@ export default function znaki(options: ZnakiOptions): Plugin {
   let spriteVersion = 0;
 
   function spriteNames(): Set<string> {
+    const dynamic = anyDynamic();
     const names = new Set<string>();
     for (const file of byFile.values()) {
       for (const name of file.names) names.add(name);
+      if (dynamic) for (const name of file.literals) names.add(name);
     }
     return names;
   }
 
+  function dynamicPrefixes(): string[] {
+    if (!anyDynamic()) return [];
+    const prefixes = new Set(options.dynamic);
+    for (const file of byFile.values()) for (const prefix of file.prefixes) prefixes.add(prefix);
+    return [...prefixes].sort();
+  }
+
   function dynamicNames(): string[] {
-    const allowed = options.dynamic;
-    if (!allowed) return registry.names();
-    return registry.names().filter((name) => allowed.some((entry) => name === entry || name.startsWith(entry)));
+    const allowed = dynamicPrefixes();
+    if (allowed.length === 0) return [];
+    const sprite = spriteNames();
+    return registry.names().filter((name) => !sprite.has(name) && allowed.some((entry) => name.startsWith(entry)));
+  }
+
+  function snapshot(): Snapshot {
+    const sprite = [...spriteNames()].sort().join("\0");
+    return { sprite, registry: anyDynamic() ? `${sprite}\n${dynamicPrefixes().join("\0")}` : "" };
   }
 
   function anyDynamic(): boolean {
@@ -80,20 +98,25 @@ export default function znaki(options: ZnakiOptions): Plugin {
   }
 
   function record(id: string, code: string, warn: (msg: string) => void): void {
-    if (!componentRe.test(code)) {
-      byFile.delete(id);
-      return;
-    }
-    const { names: found, dynamic } = scanIcons(code, component);
     const names = new Set<string>();
-    for (const name of found) {
-      if (registry.resolve(name)) names.add(name);
-      else if (!warned.has(`${id}\0${name}`)) {
-        warned.add(`${id}\0${name}`);
-        warn(`znaki: icon "${name}" not found in any configured source`);
+    let dynamic = false;
+    if (componentRe.test(code)) {
+      const scanned = scanIcons(code, component);
+      dynamic = scanned.dynamic;
+      for (const name of scanned.names) {
+        if (registry.resolve(name)) names.add(name);
+        else if (!warned.has(`${id}\0${name}`)) {
+          warned.add(`${id}\0${name}`);
+          warn(`znaki: icon "${name}" not found in any configured source`);
+        }
       }
     }
-    if (names.size > 0 || dynamic) byFile.set(id, { names, dynamic });
+
+    const scanned = scanLiterals(code);
+    const literals = new Set([...scanned.strings].filter((value) => registry.has(value)));
+    const prefixes = new Set([...scanned.prefixes].filter((prefix) => registry.names().some((name) => name.startsWith(prefix))));
+
+    if (names.size > 0 || dynamic || literals.size > 0 || prefixes.size > 0) byFile.set(id, { names, literals, prefixes, dynamic });
     else byFile.delete(id);
   }
 
@@ -135,6 +158,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
     async buildStart() {
       byFile.clear();
       warned.clear();
+      loadedShards.clear();
       registry.init(this.environment.config.root);
       spriteRef = null;
 
@@ -150,10 +174,6 @@ export default function znaki(options: ZnakiOptions): Plugin {
       );
 
       for (const dir of registry.watchDirs) this.addWatchFile(dir);
-
-      if (anyDynamic()) {
-        this.warn(`znaki: dynamic <${component} name={...}> found — falling back to the lazy icon registry`);
-      }
     },
 
     resolveId(id) {
@@ -179,9 +199,10 @@ export default function znaki(options: ZnakiOptions): Plugin {
         }
         return `export const spriteUrl = ${url};\nexport const staticNames = new Set([${names}]);\n`;
       }
-      if (id === REGISTRY_RESOLVED) return buildRegistry(anyDynamic() ? dynamicNames() : []);
+      if (id === REGISTRY_RESOLVED) return buildRegistry(dynamicNames());
       if (id.startsWith(SHARD_PREFIX_RESOLVED)) {
         const key = shardName(id);
+        loadedShards.add(key);
         return buildShard(
           registry,
           dynamicNames().filter((name) => shardKey(name) === key),
@@ -198,13 +219,15 @@ export default function znaki(options: ZnakiOptions): Plugin {
       if (!SOURCE_FILE_RE.test(id) || id.includes("node_modules")) return null;
 
       const before = spriteNames();
-      const dynamicBefore = anyDynamic();
+      const stateBefore = snapshot();
       record(id, code, (message) => this.warn(message));
 
       const after = spriteNames();
-      if (this.environment.mode === "dev" && changed(before, after, dynamicBefore, anyDynamic())) {
-        spriteVersion += 1;
-        invalidateVirtual(this.environment, dynamicBefore !== anyDynamic());
+      const stateAfter = snapshot();
+      const registryChanged = stateBefore.registry !== stateAfter.registry;
+      if (this.environment.mode === "dev" && (stateBefore.sprite !== stateAfter.sprite || registryChanged)) {
+        if (stateBefore.sprite !== stateAfter.sprite) spriteVersion += 1;
+        invalidateVirtual(this.environment, loadedShards, registryChanged);
       }
 
       if (spriteRef) {
@@ -229,15 +252,15 @@ export default function znaki(options: ZnakiOptions): Plugin {
         if (dtsPath) writeDts(dtsPath, registry.names());
       }
 
-      const before = spriteNames();
-      const dynamicBefore = anyDynamic();
+      const stateBefore = snapshot();
 
       const finish = (): EnvironmentModuleNode[] => {
-        const dynamicChanged = dynamicBefore !== anyDynamic();
-        if (!fromSourceDir && !changed(before, spriteNames(), dynamicBefore, anyDynamic())) return [...modules];
+        const stateAfter = snapshot();
+        if (!fromSourceDir && stateBefore.sprite === stateAfter.sprite && stateBefore.registry === stateAfter.registry) return [...modules];
 
-        spriteVersion += 1;
-        return [...modules, ...invalidateVirtual(this.environment, dynamicChanged)];
+        const registryChanged = stateBefore.registry !== stateAfter.registry || (fromSourceDir && anyDynamic());
+        if (fromSourceDir || stateBefore.sprite !== stateAfter.sprite) spriteVersion += 1;
+        return [...modules, ...invalidateVirtual(this.environment, loadedShards, registryChanged)];
       };
 
       if (fromSourceDir) return finish();
@@ -256,15 +279,15 @@ function isDevSpriteRequest(url: string | undefined, base: string): boolean {
   return path === DEV_SPRITE_PATH || path === withBase;
 }
 
-function changed(before: Set<string>, after: Set<string>, dynamicBefore: boolean, dynamicAfter: boolean): boolean {
-  if (dynamicBefore !== dynamicAfter) return true;
-  if (before.size !== after.size) return true;
-  return [...after].some((name) => !before.has(name));
+interface Snapshot {
+  sprite: string;
+  registry: string;
 }
 
 function invalidateVirtual(
   environment: { moduleGraph: import("vite").EnvironmentModuleGraph },
-  dynamicChanged: boolean,
+  shards: Set<string>,
+  registryChanged: boolean,
 ): EnvironmentModuleNode[] {
   const affected: EnvironmentModuleNode[] = [];
   const sprite = environment.moduleGraph.getModuleById(SPRITE_RESOLVED);
@@ -272,11 +295,13 @@ function invalidateVirtual(
     environment.moduleGraph.invalidateModule(sprite);
     affected.push(sprite);
   }
-  if (dynamicChanged) {
-    const registryModule = environment.moduleGraph.getModuleById(REGISTRY_RESOLVED);
-    if (registryModule) {
-      environment.moduleGraph.invalidateModule(registryModule);
-      affected.push(registryModule);
+  if (registryChanged) {
+    for (const id of [REGISTRY_RESOLVED, ...[...shards].map((key) => `\0${shardId(key)}`)]) {
+      const module = environment.moduleGraph.getModuleById(id);
+      if (module) {
+        environment.moduleGraph.invalidateModule(module);
+        affected.push(module);
+      }
     }
   }
   return affected;

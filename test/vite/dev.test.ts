@@ -112,7 +112,7 @@ describe("dev registry", () => {
   });
 
   it("fills in once a dynamic usage appears", async () => {
-    project.file("main.tsx", `export const C = (p) => <Icon name={p.name} />;`);
+    project.file("main.tsx", "export const C = (p) => <Icon name={`i:${p.name}`} />;");
     const dev = await start();
 
     const code = await dev.transform("virtual:znaki/registry");

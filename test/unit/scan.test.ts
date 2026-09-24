@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { scanIcons } from "../../src/vite/scan.ts";
+import { scanIcons, scanLiterals } from "../../src/vite/scan.ts";
 
 function names(code: string, component = "Icon"): string[] {
   return [...scanIcons(code, component).names].sort();
@@ -172,5 +172,22 @@ describe("scanIcons: For bindings", () => {
     const result = scanIcons(code, "Icon");
     expect([...result.names]).toEqual(["a"]);
     expect(result.dynamic).toBe(true);
+  });
+});
+
+describe("scanLiterals", () => {
+  it("collects quoted and backtick string literals", () => {
+    const { strings } = scanLiterals("const a = \"i:home\";\nconst b = <X icon='i:user' />;\nconst c = `i:star`;");
+    expect([...strings].sort()).toEqual(["i:home", "i:star", "i:user"]);
+  });
+
+  it("skips strings with whitespace or markup", () => {
+    const { strings } = scanLiterals(`const a = "two words";\nconst b = "<svg>";`);
+    expect([...strings]).toEqual([]);
+  });
+
+  it("collects the static head of a template literal", () => {
+    const { prefixes } = scanLiterals("const a = `i:arrow-${dir}`;\nconst b = `${x}-y`;");
+    expect([...prefixes]).toEqual(["i:arrow-"]);
   });
 });

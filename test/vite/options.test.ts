@@ -12,14 +12,6 @@ const project = useProject("znaki-options");
 const bundle = (options: ZnakiOptions) => buildProject({ root: project.root, options });
 
 describe("warnings", () => {
-  it("warns about dynamic usage", async () => {
-    project.file("main.tsx", `export const C = (p) => <Icon name={p.name} />;`);
-
-    const { warnings } = await bundle({ sources: [memorySource()], dts: false });
-
-    expect(warnings.join("\n")).toContain("dynamic <Icon name={...}>");
-  });
-
   it("warns about icons missing from every source", async () => {
     project.file("main.tsx", `export const C = () => <Icon name="i:nope" />;`);
 
