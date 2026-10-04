@@ -2,15 +2,6 @@ import MagicString from "magic-string";
 import type { SourceMap } from "magic-string";
 import { parseSync } from "oxc-parser";
 
-import { symbolId } from "../id.ts";
-
-export type CompileTarget = "react" | "solid" | "reze";
-
-export interface CompileIconsOptions {
-  target: CompileTarget;
-  lazy: boolean;
-}
-
 export interface CompileIconsResult {
   code: string;
   map?: SourceMap;
@@ -20,7 +11,6 @@ export interface CompileIconsResult {
 
 const ZNAKI_SOURCE = "znaki";
 const RUNTIME_SOURCE = "znaki/runtime";
-const COMPONENT_SOURCE = "virtual:znaki/component";
 const FROM_ZNAKI_RE = /(?:from|import)\s*["']znaki["']/;
 const INTRINSIC_NAMES: Record<string, true> = { Icon: true, PreloadSprite: true };
 
@@ -42,31 +32,36 @@ interface FileState {
   id: string;
   code: string;
   ms: MagicString;
-  target: CompileTarget;
-  lazy: boolean;
   taken: Set<string>;
   names: Set<string>;
   dynamic: boolean;
   dirty: boolean;
+  needSpriteHref: string | null;
+  needSvgProps: string | null;
   needSpriteUrl: string | null;
-  needLazy: string | null;
-  needSpriteComponent: string | null;
 }
 
 /**
  * Lowers the `Icon` / `PreloadSprite` compile-time intrinsics imported from
- * `"znaki"` into ordinary JSX, collecting the icon names the file needs.
+ * `"znaki"` into ordinary JSX `<svg><use /></svg>`, collecting the icon names
+ * the file needs.
+ *
+ * Backend-independent: every `Icon` becomes a direct `<svg><use /></svg>`
+ * whose `href` resolves through the synchronous runtime `spriteHref` (main
+ * sprite or shared lazy sprite). No framework components, no inline SVG
+ * body, no async delivery. Fully static icons emit an explicit
+ * `<svg><use /></svg>`; anything dynamic or spread routes through one
+ * `svgProps` spread whose merged literal evaluates once per framework
+ * spread update, with the `<use>` built by a children callback inside the
+ * same binding so React re-renders and Solid fine-grained effects keep
+ * tracking the original slices.
  *
  * Returns `null` when the file imports no intrinsic (nothing to do) or cannot
  * be parsed (leaves reporting to the downstream compiler). Recognized
  * intrinsic usages that cannot be lowered throw a `znaki:` diagnostic instead
  * of silently becoming missing icons.
  */
-export function compileIcons(code: string, id: string, options: CompileIconsOptions): CompileIconsResult | null {
-  const target = options.target;
-  if (target !== "react" && target !== "solid" && target !== "reze") {
-    throw new Error(`znaki: ${id}: unknown target ${JSON.stringify(target)} (expected "react", "solid" or "reze")`);
-  }
+export function compileIcons(code: string, id: string): CompileIconsResult | null {
   if (!FROM_ZNAKI_RE.test(code)) return null;
 
   let program: N;
@@ -82,15 +77,13 @@ export function compileIcons(code: string, id: string, options: CompileIconsOpti
     id,
     code,
     ms: new MagicString(code),
-    target,
-    lazy: options.lazy,
     taken: new Set(),
     names: new Set(),
     dynamic: false,
     dirty: false,
+    needSpriteHref: null,
+    needSvgProps: null,
     needSpriteUrl: null,
-    needLazy: null,
-    needSpriteComponent: null,
   };
 
   const root: Scope = { parent: null, bindings: new Map() };
@@ -607,7 +600,23 @@ function lowerIntrinsic(element: N, opening: N, kind: BindingKind, namespace: st
   if (!nameAttr && !hasSpread) {
     fail(file, element, `<${display}> requires a "name" prop`);
   }
-  file.ms.overwrite(element.start, element.end, lowerIconSvg(attrs, nameAttr, display, file));
+  const sizeAttr = attrs.find((attr) => attr.size) ?? null;
+  if (sizeAttr && !nodeField(sizeAttr.node, "value")) {
+    fail(file, sizeAttr.node, `<${display}> "size" requires a value`);
+  }
+  if (nameAttr) {
+    const nameNode = nameExpression(nameAttr);
+    if (!nameNode) {
+      fail(file, nameAttr.node, `<${display}> requires a static or dynamic "name" expression`);
+    }
+    const info = resolveName(nameNode);
+    for (const name of info.names) file.names.add(name);
+    if (info.dynamic) file.dynamic = true;
+  } else {
+    file.dynamic = true;
+  }
+  if (hasSpread) file.dynamic = true;
+  file.ms.overwrite(element.start, element.end, lowerIconSvg(attrs, nameAttr, sizeAttr, display, file));
   file.dirty = true;
 }
 
@@ -621,35 +630,24 @@ function nameExpression(attr: IconAttr): N | null {
   return expression;
 }
 
-function lowerIconSvg(attrs: IconAttr[], nameAttr: IconAttr | null, display: string, file: FileState): string {
-  if (!nameAttr) {
-    file.dynamic = true;
-    if (file.lazy) return lowerLazy(attrs, file);
-    return lowerMerge(attrs, file);
+function lowerIconSvg(attrs: IconAttr[], nameAttr: IconAttr | null, sizeAttr: IconAttr | null, display: string, file: FileState): string {
+  const hasSpread = attrs.some((attr) => attr.spread);
+  if (!hasSpread && nameAttr && sizeIsStatic(sizeAttr)) {
+    const nameNode = nameExpression(nameAttr);
+    if (nameNode && literalName(nameNode) !== null) return buildSvgFast(attrs, sizeAttr, nameNode, file);
   }
-  const nameNode = nameExpression(nameAttr);
-  if (!nameNode) {
-    fail(file, nameAttr.node, `<${display}> requires a static or dynamic "name" expression`);
-  }
-  const info = resolveName(nameNode);
-  for (const name of info.names) file.names.add(name);
-  if (attrs.some((attr) => attr.spread)) {
-    file.dynamic = true;
-    return file.lazy ? lowerLazy(attrs, file) : lowerMerge(attrs, file);
-  }
-  if (info.dynamic) file.dynamic = true;
-  if (info.dynamic && file.lazy) return lowerLazy(attrs, file);
-  const sizeAttr = attrs.find((attr) => attr.size) ?? null;
-  if (sizeAttr && !nodeField(sizeAttr.node, "value")) {
-    fail(file, sizeAttr.node, `<${display}> "size" requires a value`);
-  }
-  const literal = literalName(nameNode);
-  const sizeNode = sizeAttr ? nameExpression(sizeAttr) : null;
-  if (literal === null || (sizeNode !== null && literalName(sizeNode) === null && sizeNode.type !== "Literal")) {
-    return lowerMerge(attrs, file);
-  }
-  const spriteUrl = importName(file, "needSpriteUrl", "spriteUrl");
-  return buildSvg(attrs, sizeAttr, file, `<use href={${spriteUrl} + ${JSON.stringify(`#${symbolId(literal)}`)}} />`);
+  return lowerHelper(attrs, display, file);
+}
+
+function sizeIsStatic(sizeAttr: IconAttr | null): boolean {
+  if (!sizeAttr) return true;
+  const value = nodeField(sizeAttr.node, "value");
+  if (!value) return false;
+  if (value.type === "Literal") return true;
+  if (value.type !== "JSXExpressionContainer") return false;
+  const expression = nodeField(value, "expression");
+  if (!expression || expression.type === "JSXEmptyExpression") return true;
+  return expression.type === "Literal";
 }
 
 function literalName(node: N): string | null {
@@ -664,46 +662,71 @@ function literalName(node: N): string | null {
   return null;
 }
 
-function lowerLazy(attrs: IconAttr[], file: FileState): string {
-  const lazy = importName(file, "needLazy", "LazyIcon");
-  const rendered = attrs.map((attr) => ` ${file.code.slice(attr.node.start, attr.node.end)}`).join("");
-  return `<${lazy}${rendered} />`;
-}
-
-function lowerMerge(attrs: IconAttr[], file: FileState): string {
-  const name = importName(file, "needSpriteComponent", "SpriteIcon");
-  return `<${name}${attrs.map((attr) => ` ${file.code.slice(attr.node.start, attr.node.end)}`).join("")} />`;
-}
-
-function buildSvg(attrs: IconAttr[], sizeAttr: IconAttr | null, file: FileState, use: string): string {
+function buildSvgFast(attrs: IconAttr[], sizeAttr: IconAttr | null, nameNode: N, file: FileState): string {
   const parts: string[] = [];
   const hasAriaLabel = attrs.some((attr) => attr.key === "aria-label" || attr.key === "aria-labelledby");
   const hasAriaHidden = attrs.some((attr) => attr.key === "aria-hidden");
   if (!hasAriaLabel && !hasAriaHidden) parts.push(`aria-hidden="true"`);
-  parts.push(sizeAttr ? sizeEmission(sizeAttr, file) : `width="1em" height="1em"`);
+  parts.push(sizeEmissionFast(sizeAttr, file));
   for (const attr of attrs) {
     if (!attr.isName && !attr.size) parts.push(file.code.slice(attr.node.start, attr.node.end));
   }
-  return `<svg ${parts.join(" ")}>${use}</svg>`;
+  const href = importName(file, "needSpriteHref", "spriteHref");
+  return `<svg ${parts.join(" ")}><use href={${href}(${file.code.slice(nameNode.start, nameNode.end)})} /></svg>`;
 }
 
-function sizeEmission(attr: IconAttr, file: FileState): string {
-  const value = nodeField(attr.node, "value");
-  if (value && value.type === "Literal" && typeof value.value === "string") {
+function sizeEmissionFast(sizeAttr: IconAttr | null, file: FileState): string {
+  if (!sizeAttr) return `width="1em" height="1em"`;
+  const value = nodeField(sizeAttr.node, "value");
+  if (value && value.type === "Literal") {
     const slice = file.code.slice(value.start, value.end);
     return `width=${slice} height=${slice}`;
   }
   const expression = value && value.type === "JSXExpressionContainer" ? nodeField(value, "expression") : null;
   if (!expression || expression.type === "JSXEmptyExpression") return `width="1em" height="1em"`;
   const slice = file.code.slice(expression.start, expression.end);
-  if (expression.type === "Literal") return `width={${slice} ?? "1em"} height={${slice} ?? "1em"}`;
-  return `{...((__znakiSize) => ({ width: __znakiSize ?? "1em", height: __znakiSize ?? "1em" }))(${slice})}`;
+  return `width={${slice}} height={${slice}}`;
 }
 
-function importName(file: FileState, slot: "needSpriteUrl" | "needLazy" | "needSpriteComponent", exported: string): string {
+function lowerHelper(attrs: IconAttr[], display: string, file: FileState): string {
+  const merged: string[] = [];
+  for (const attr of attrs) {
+    if (attr.spread) {
+      const argument = attr.spread;
+      if (!argument) fail(file, attr.node, `<${display}> spread requires an expression`);
+      merged.push(`...${file.code.slice(argument.start, argument.end)}`);
+      continue;
+    }
+    const key = attr.key;
+    if (key === null) fail(file, attr.node, `<${display}> unsupported attribute`);
+    merged.push(`${JSON.stringify(key)}: ${propValue(attr, display, file)}`);
+  }
+  const svgProps = importName(file, "needSvgProps", "svgProps");
+  const href = importName(file, "needSpriteHref", "spriteHref");
+  let param = "__znakiName";
+  let index = 1;
+  while (file.taken.has(param)) {
+    index += 1;
+    param = `__znakiName$${index}`;
+  }
+  file.taken.add(param);
+  return `<svg {...${svgProps}({${merged.join(", ")}}, (${param}) => <use href={${href}(${param})} />)} />`;
+}
+
+function propValue(attr: IconAttr, display: string, file: FileState): string {
+  const value = nodeField(attr.node, "value");
+  if (!value) return "true";
+  if (value.type === "Literal") return file.code.slice(value.start, value.end);
+  if (value.type !== "JSXExpressionContainer") fail(file, attr.node, `<${display}> unsupported attribute`);
+  const expression = nodeField(value, "expression");
+  if (!expression || expression.type === "JSXEmptyExpression") return "true";
+  return file.code.slice(expression.start, expression.end);
+}
+
+function importName(file: FileState, slot: "needSpriteHref" | "needSvgProps" | "needSpriteUrl", exported: string): string {
   const existing = file[slot];
   if (existing) return existing;
-  const head = exported === "LazyIcon" ? "LazyIcon" : `${exported[0]?.toUpperCase() ?? ""}${exported.slice(1)}`;
+  const head = `${exported[0]?.toUpperCase() ?? ""}${exported.slice(1)}`;
   let candidate = `__znaki${head}`;
   let index = 1;
   while (file.taken.has(candidate)) {
@@ -773,22 +796,14 @@ function removeStatement(file: FileState, node: N): void {
 
 function insertHelperImports(file: FileState, program: N, removals: Array<{ node: N; specifiers: N[] }>): void {
   const runtime: Array<[string, string]> = [];
+  if (file.needSpriteHref) runtime.push(["spriteHref", file.needSpriteHref]);
+  if (file.needSvgProps) runtime.push(["svgProps", file.needSvgProps]);
   if (file.needSpriteUrl) runtime.push(["spriteUrl", file.needSpriteUrl]);
-  const lines: string[] = [];
-  if (runtime.length > 0) {
-    const rendered = runtime.map(([name, alias]) => (name === alias ? name : `${name} as ${alias}`)).join(", ");
-    lines.push(`import { ${rendered} } from ${JSON.stringify(RUNTIME_SOURCE)};`);
-  }
-  if (file.needSpriteComponent) {
-    lines.push(`import { SpriteIcon as ${file.needSpriteComponent} } from ${JSON.stringify(COMPONENT_SOURCE)};`);
-  }
-  if (file.needLazy) {
-    const rendered = file.needLazy === "LazyIcon" ? "LazyIcon" : `LazyIcon as ${file.needLazy}`;
-    lines.push(`import { ${rendered} } from ${JSON.stringify(COMPONENT_SOURCE)};`);
-  }
-  if (lines.length === 0) return;
+  if (runtime.length === 0) return;
+  const rendered = runtime.map(([name, alias]) => (name === alias ? name : `${name} as ${alias}`)).join(", ");
   const position = insertPosition(file, program, removals);
-  file.ms.appendLeft(position, position === 0 ? `${lines.join("\n")}\n` : `\n${lines.join("\n")}`);
+  const line = `import { ${rendered} } from ${JSON.stringify(RUNTIME_SOURCE)};`;
+  file.ms.appendLeft(position, position === 0 ? `${line}\n` : `\n${line}`);
   file.dirty = true;
 }
 
@@ -837,198 +852,4 @@ function offsetToLineCol(code: string, offset: number): string {
     }
   }
   return `${line}:${column}`;
-}
-
-const BACKENDS: Record<CompileTarget, () => string> = {
-  react: reactBackend,
-  solid: solidBackend,
-  reze: rezeBackend,
-};
-
-/** Returns the source of the `virtual:znaki/component` lazy backend module for a target. */
-export function componentModule(target: CompileTarget): string {
-  const backend = BACKENDS[target];
-  if (!backend) {
-    throw new Error(`znaki: unknown target ${JSON.stringify(target)} (expected "react", "solid" or "reze")`);
-  }
-  const native = target === "react" ? `const { name, size, ...rest } = props;` : `const rest = __znakiOmit(props, "name", "size");`;
-  const props = target === "react" ? "" : "props.";
-  const imports =
-    target === "react"
-      ? ""
-      : target === "solid"
-        ? `import { omit as __znakiOmit } from "solid-js";\n`
-        : `import { omitProps as __znakiOmit } from "reze-js";\n`;
-  return (
-    backend() +
-    `\n${imports}import { spriteHref as __znakiSpriteHref } from "znaki/runtime";
-export function SpriteIcon(props: LazyIconProps): JSX.Element {
-  ${native}
-  return <svg width={${props}size ?? "1em"} height={${props}size ?? "1em"}
-    aria-hidden={rest["aria-label"] || rest["aria-labelledby"] ? undefined : "true"} {...rest}>
-    <use href={__znakiSpriteHref(${props}name)}/>
-  </svg>;
-}\n`
-  );
-}
-
-function reactBackend(): string {
-  return `import { Suspense, use, useId } from "react";
-import type { JSX, SVGProps } from "react";
-import type { IconData, IconName } from "znaki";
-import { isSpriteName, loadIcon, scopeIcon, spriteUrl, symbolId } from "znaki/runtime";
-
-export interface LazyIconProps extends Omit<SVGProps<SVGSVGElement>, "dangerouslySetInnerHTML"> {
-  name: IconName;
-  size?: number | string;
-}
-
-export function LazyIcon(props: LazyIconProps): JSX.Element {
-  if (isSpriteName(props.name)) {
-    return <LazyShell {...props} />;
-  }
-  return (
-    <Suspense fallback={<svg width={props.width ?? props.size ?? "1em"} height={props.height ?? props.size ?? "1em"} aria-hidden="true"/>}>
-      <LazyShell {...props} />
-    </Suspense>
-  );
-}
-
-function LazyShell({ name, size, ...rest }: LazyIconProps): JSX.Element {
-  const instanceId = symbolId(useId());
-  const sprite = isSpriteName(name);
-  const data: IconData | null = sprite ? null : use(loadIcon(name));
-  if (!sprite && data === null) {
-    throw new Error(\`znaki: icon "\${name}" not found in any configured source\`);
-  }
-  const scoped: IconData | null = data === null ? null : scopeIcon(data, \`znaki-\${instanceId}\`);
-  return (
-    <svg
-      width={size ?? "1em"}
-      height={size ?? "1em"}
-      viewBox={scoped?.viewBox}
-      aria-hidden={rest["aria-label"] ?? rest["aria-labelledby"] ? undefined : "true"}
-      {...(scoped === null
-        ? undefined
-        : Object.fromEntries(
-            Object.entries(scoped.attrs).map(([key, value]) => [
-              key.startsWith("data-") || key.startsWith("aria-")
-                ? key
-                : key.replace(/-([a-z])/g, (_match: string, letter: string) => letter.toUpperCase()),
-              value,
-            ]),
-          ))}
-      {...rest}
-    >
-      {scoped === null ? <use href={\`\${spriteUrl}#\${symbolId(name)}\`} /> : <g dangerouslySetInnerHTML={{ __html: scoped.body }} />}
-    </svg>
-  );
-}
-`;
-}
-
-function solidBackend(): string {
-  return `import { Loading, Show } from "@solidjs/web";
-import type { JSX } from "@solidjs/web";
-import { createMemo, createUniqueId, omit } from "solid-js";
-import type { IconData, IconName } from "znaki";
-import { isSpriteName, loadIcon, scopeIcon, spriteUrl, symbolId } from "znaki/runtime";
-
-export interface LazyIconProps extends Omit<JSX.SvgSVGAttributes<SVGSVGElement>, "name"> {
-  name: IconName;
-  size?: number | string;
-}
-
-export function LazyIcon(props: LazyIconProps): JSX.Element {
-  return (
-    <Loading fallback={<svg width={props.width ?? props.size ?? "1em"} height={props.height ?? props.size ?? "1em"} aria-hidden="true"/>}>
-      <LazyShell {...props} />
-    </Loading>
-  );
-}
-
-function LazyShell(props: LazyIconProps): JSX.Element {
-  const rest = omit(props, "name", "size");
-  const prefix = symbolId(createUniqueId());
-  const data = createMemo(() => isSpriteName(props.name) ? null : loadIcon(props.name));
-  const scoped = createMemo(() => {
-    const current = data();
-    if (current === null) {
-      if (!isSpriteName(props.name)) throw new Error(\`znaki: icon "\${props.name}" is not included; configure includeIcons or lazyIcons\`);
-      return null;
-    }
-    return scopeIcon(current, prefix);
-  });
-  return (
-    <svg
-      width={props.size ?? "1em"}
-      height={props.size ?? "1em"}
-      viewBox={scoped()?.viewBox}
-      aria-hidden={rest["aria-label"] ?? rest["aria-labelledby"] ? undefined : "true"}
-      {...scoped()?.attrs}
-      {...rest}
-    >
-      <Show when={scoped()} fallback={<use href={\`\${spriteUrl}#\${symbolId(props.name)}\`} />}>
-        {(icon) => <g innerHTML={icon().body} />}
-      </Show>
-    </svg>
-  );
-}
-`;
-}
-
-function rezeBackend(): string {
-  return `import { asyncComputed, computed, Loading, omitProps } from "reze-js";
-import type { JSX } from "reze-js";
-import type { IconName } from "znaki";
-import { isSpriteName, loadIcon, scopeIcon, spriteUrl, symbolId } from "znaki/runtime";
-
-// Client-only instance counter: every inline render scopes its gradient and
-// id references under a fresh prefix. Server rendering would need
-// deterministic ids instead.
-let nextInstanceId = 0;
-
-export interface LazyIconProps extends Omit<JSX.IntrinsicElements["svg"], "name"> {
-  name: IconName;
-  size?: number | string;
-}
-
-export function LazyIcon(props: LazyIconProps): JSX.Element {
-  return (
-    <Loading fallback={<svg width={props.width ?? props.size ?? "1em"} height={props.height ?? props.size ?? "1em"} aria-hidden="true"/>}>
-      <LazyShell {...props} />
-    </Loading>
-  );
-}
-
-function LazyShell(props: LazyIconProps): JSX.Element {
-  const rest = omitProps(props, "name", "size");
-  const prefix = \`znaki-reze-\${(nextInstanceId += 1).toString(36)}\`;
-  const data = asyncComputed(() => {
-    const name = props.name;
-    if (isSpriteName(name)) return null;
-    return loadIcon(name).then((icon) => {
-      if (icon === null) throw new Error(\`znaki: icon "\${name}" not found in any configured source\`);
-      return scopeIcon(icon, prefix);
-    });
-  });
-  const scoped = computed(() => {
-    const error = data.error();
-    if (error !== undefined) throw error;
-    return data.value();
-  });
-  return (
-    <svg
-      width={props.size ?? "1em"}
-      height={props.size ?? "1em"}
-      viewBox={scoped()?.viewBox}
-      aria-hidden={rest["aria-label"] ?? rest["aria-labelledby"] ? undefined : "true"}
-      {...scoped()?.attrs}
-      {...rest}
-    >
-      {isSpriteName(props.name) ? <use href={\`\${spriteUrl}#\${symbolId(props.name)}\`} /> : <g prop:innerHTML={scoped()?.body} />}
-    </svg>
-  );
-}
-`;
 }

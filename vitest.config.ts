@@ -40,13 +40,12 @@ export default defineConfig({
         },
       },
       {
-        plugins: [compilerPlugin("solid"), solid()],
+        plugins: [compilerPlugin(), solid()],
         resolve: {
           alias: {
             "znaki/runtime": resolve(root, "src/runtime/index.ts"),
             znaki: resolve(root, "src/index.ts"),
             "virtual:znaki/sprite": virtualStubs,
-            "virtual:znaki/registry": virtualStubs,
           },
         },
         test: {
@@ -56,13 +55,12 @@ export default defineConfig({
         },
       },
       {
-        plugins: [compilerPlugin("react"), react({ jsxImportSource: "react" })],
+        plugins: [compilerPlugin(), react({ jsxImportSource: "react" })],
         resolve: {
           alias: {
             "znaki/runtime": resolve(root, "src/runtime/index.ts"),
             znaki: resolve(root, "src/index.ts"),
             "virtual:znaki/sprite": virtualStubs,
-            "virtual:znaki/registry": virtualStubs,
           },
         },
         test: {
@@ -78,7 +76,6 @@ export default defineConfig({
             "znaki/runtime": resolve(root, "src/runtime/index.ts"),
             znaki: resolve(root, "src/index.ts"),
             "virtual:znaki/sprite": virtualStubs,
-            "virtual:znaki/registry": virtualStubs,
           },
         },
         test: {

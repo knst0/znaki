@@ -7,11 +7,18 @@ import { build } from "./vite.ts";
 export type ZnakiOptions = Parameters<typeof znaki>[0];
 export type Output = Rollup.RollupOutput["output"];
 
+export interface SvgAsset {
+  fileName: string;
+  source: string;
+}
+
 export interface BuildResult {
   output: Output;
   warnings: string[];
   chunk: string;
   sprite: string;
+  lazy: string;
+  assets: SvgAsset[];
 }
 
 export interface BuildParams {
@@ -27,9 +34,14 @@ function chunkCode(output: Output): string {
     .join("\n");
 }
 
-function spriteMarkup(output: Output): string {
-  const asset = output.find((item) => item.type === "asset" && String(item.fileName).endsWith(".svg"));
-  return asset && asset.type === "asset" ? String(asset.source) : "";
+function svgAssets(output: Output): SvgAsset[] {
+  const assets: SvgAsset[] = [];
+  for (const item of output) {
+    if (item.type === "asset" && String(item.fileName).endsWith(".svg")) {
+      assets.push({ fileName: String(item.fileName), source: String(item.source) });
+    }
+  }
+  return assets.sort((a, b) => (a.fileName < b.fileName ? -1 : a.fileName > b.fileName ? 1 : 0));
 }
 
 export async function buildProject({ root, options, entry = "main.tsx" }: BuildParams): Promise<BuildResult> {
@@ -65,6 +77,14 @@ export async function buildProject({ root, options, entry = "main.tsx" }: BuildP
 
   const outputs = Array.isArray(result) ? result : [result];
   const output = outputs.flatMap((item) => [...item.output]) as Output;
+  const assets = svgAssets(output);
 
-  return { output, warnings, chunk: chunkCode(output), sprite: spriteMarkup(output) };
+  return {
+    output,
+    warnings,
+    chunk: chunkCode(output),
+    sprite: assets.find((asset) => asset.fileName.includes("sprite"))?.source ?? "",
+    lazy: assets.find((asset) => asset.fileName.includes("lazy"))?.source ?? "",
+    assets,
+  };
 }

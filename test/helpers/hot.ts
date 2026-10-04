@@ -21,10 +21,7 @@ export function createHotHarness({ root, sources, options = {} }: HotParams): Ho
   const plugin = znaki({ sources, dts: false, ...options });
   const invalidated: string[] = [];
   const warnings: string[] = [];
-  const modules = new Map<string, { id: string }>([
-    ["\0virtual:znaki/sprite", { id: "\0virtual:znaki/sprite" }],
-    ["\0virtual:znaki/registry", { id: "\0virtual:znaki/registry" }],
-  ]);
+  const modules = new Map<string, { id: string }>([["\0virtual:znaki/sprite", { id: "\0virtual:znaki/sprite" }]]);
 
   const context = {
     environment: {

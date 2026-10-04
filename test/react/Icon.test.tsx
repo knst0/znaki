@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { Icon, PreloadSprite } from "znaki";
 import type { IconName } from "znaki";
 
-import { lazyIcon, spriteUrl } from "../fixtures/virtual.ts";
+import { lazySpriteUrl, spriteUrl } from "../fixtures/virtual.ts";
 import { mount, svg } from "../helpers/render-react.tsx";
 
 const Lazy = (props: { name: IconName; fill?: string }) => <Icon {...props} />;
@@ -22,29 +22,19 @@ describe("Icon: sprite mode", () => {
   });
 });
 
-describe("Icon: lazy registry", () => {
-  it("loads a non-sprite icon from the registry", async () => {
+describe("Icon: lazy sprite", () => {
+  it("references the shared lazy sprite symbol through use", async () => {
     const host = await mount(<Lazy name="i:lazy" />);
 
-    expect(svg(host).getAttribute("viewBox")).toBe(lazyIcon.viewBox);
-    expect(svg(host).getAttribute("fill")).toBe("red");
-    expect(svg(host).querySelector("g > circle")?.getAttribute("r")).toBe("1");
-    expect(svg(host).querySelector("use")).toBeNull();
+    expect(svg(host).querySelector("use")?.getAttribute("href")).toBe(`${lazySpriteUrl}#znaki-i_3a_lazy`);
   });
 
-  it("keeps local SVG definitions distinct between repeated lazy instances", async () => {
-    const host = await mount(
-      <>
-        <Lazy name="i:lazy" />
-        <Lazy name="i:lazy" />
-      </>,
-    );
-    const icons = [...host.querySelectorAll("svg")];
-    const ids = icons.map((icon) => icon.querySelector("linearGradient")!.id);
-    expect(new Set(ids).size).toBe(2);
-    for (let index = 0; index < icons.length; index++) {
-      expect(icons[index].querySelector("circle")?.getAttribute("fill")).toBe(`url(#${ids[index]})`);
-    }
+  it("renders no inline body of its own", async () => {
+    const host = await mount(<Lazy name="i:lazy" />);
+
+    expect(svg(host).hasAttribute("viewBox")).toBe(false);
+    expect(svg(host).querySelector("g")).toBeNull();
+    expect(svg(host).querySelector("circle")).toBeNull();
   });
 });
 
@@ -103,12 +93,6 @@ describe("Icon: props", () => {
 
     expect(element.getAttribute("class")).toBe("icon");
     expect(element.getAttribute("data-testid")).toBe("x");
-  });
-
-  it("lets explicit props win over the icon data attrs", async () => {
-    const host = await mount(<Lazy name="i:lazy" fill="currentColor" />);
-
-    expect(svg(host).getAttribute("fill")).toBe("currentColor");
   });
 
   it("does not leak its own props onto the svg", async () => {

@@ -76,4 +76,13 @@ describe("hot update transitions", () => {
     await h.buildStart();
     expect(await spriteNames(h)).toEqual([]);
   });
+
+  it("refreshes the lazy sprite when a matching source icon appears", async () => {
+    project.file("main.tsx", `export const n = 1;`);
+    const h = await harness({ lazyIcons: ["local:*"] });
+    writeFileSync(join(iconDir, "added.svg"), SVG);
+    await h.hotUpdate(join(iconDir, "added.svg"), SVG);
+    expect(h.load("\0virtual:znaki/sprite")).toContain("local:added");
+    expect(h.invalidated).toContain("\0virtual:znaki/sprite");
+  });
 });

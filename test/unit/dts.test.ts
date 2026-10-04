@@ -8,11 +8,11 @@ import { useProject } from "../fixtures/project.ts";
 
 const project = useProject("znaki-dts");
 
-it("does not trigger a declaration file change when the target and catalogue are unchanged", () => {
+it("does not trigger a declaration file change when the catalogue is unchanged", () => {
   const path = join(project.root, "types", "znaki.d.ts");
-  writeDts(path, ["home"], "solid");
+  writeDts(path, ["home"]);
   const oldTime = new Date("2020-01-01T00:00:00Z");
   utimesSync(path, oldTime, oldTime);
-  writeDts(path, ["home"], "solid");
+  writeDts(path, ["home"]);
   expect(statSync(path).mtimeMs).toBe(oldTime.getTime());
 });

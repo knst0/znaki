@@ -7,29 +7,10 @@ import type { SourceMap } from "magic-string";
 import { normalizePath } from "vite";
 import type { EnvironmentModuleGraph, EnvironmentModuleNode, Plugin } from "vite";
 
-import { shardKey } from "../id.ts";
-import {
-  collectEntries,
-  groupByShard,
-  registryModuleCode,
-  shardKeys,
-  shardModuleCode,
-  shardToken,
-  spriteModuleCode,
-  SPRITE_TOKEN,
-} from "./artifacts.ts";
-import { compileIcons, componentModule } from "./compiler.ts";
+import { collectEntries, LAZY_TOKEN, LAZY_URL_TOKEN, spriteModuleCode, SPRITE_TOKEN, SPRITE_URL_TOKEN } from "./artifacts.ts";
+import { compileIcons } from "./compiler.ts";
 import { writeDts } from "./dts.ts";
-import {
-  COMPONENT_ID,
-  REGISTRY_ID,
-  REGISTRY_RESOLVED,
-  SHARD_PREFIX,
-  SHARD_PREFIX_RESOLVED,
-  shardName,
-  SPRITE_ID,
-  SPRITE_RESOLVED,
-} from "./ids.ts";
+import { SPRITE_ID, SPRITE_RESOLVED } from "./ids.ts";
 import { buildManifest, expandPatterns, missingExact } from "./manifest.ts";
 import type { ZnakiOptions } from "./manifest.ts";
 import { SourceRegistry } from "./source.ts";
@@ -44,11 +25,11 @@ export type { LibraryOptions } from "./sources/library.ts";
 export { lucide } from "./sources/lucide.ts";
 export type { LucideOptions } from "./sources/lucide.ts";
 export type { IconSource } from "./source.ts";
-export type { FrameworkIntegration, FrameworkScanResult, ZnakiOptions, ZnakiTarget } from "./manifest.ts";
+export type { ZnakiOptions } from "./manifest.ts";
 
 const SOURCE_FILE_RE = /\.[tj]sx$/;
 const DEV_SPRITE_PATH = "/@znaki/sprite.svg";
-const SPRITE_URL_TOKEN = "__ZNAKI_SPRITE_URL__";
+const DEV_LAZY_PATH = "/@znaki/lazy.svg";
 const SKIPPED_DIRS: Record<string, true> = { node_modules: true, dist: true, build: true, coverage: true, "storybook-static": true };
 
 interface FileIcons {
@@ -59,8 +40,8 @@ interface FileIcons {
 interface EnvState {
   files: Map<string, FileIcons>;
   warned: Set<string>;
-  loadedShards: Set<string>;
   spriteRef: string | null;
+  lazyRef: string | null;
   spriteRequested: boolean;
 }
 
@@ -70,10 +51,8 @@ interface TransformAnalysis {
 }
 
 export default function znaki(options: ZnakiOptions): Plugin {
-  const target = options.target ?? "react";
   const includePatterns = [...(options.includeIcons ?? [])].sort();
   const lazyPatterns = [...(options.lazyIcons ?? [])].sort();
-  const lazyEnabled = lazyPatterns.length > 0;
   const registry = new SourceRegistry(options.sources);
   const states = new Map<string, EnvState>();
 
@@ -81,14 +60,14 @@ export default function znaki(options: ZnakiOptions): Plugin {
   let dtsPath: string | false = false;
   let excludedPaths = new Set<string>();
   let spriteVersion = 0;
-  let componentPath = normalizePath(resolve(".znaki/component.tsx"));
+  let lazyVersion = 0;
 
   function stateFor(environment: { name: string }): EnvState {
     // Keyed per environment; harnesses without a name share one key consistently.
     const key = `${environment.name}`;
     let state = states.get(key);
     if (!state) {
-      state = { files: new Map(), warned: new Set(), loadedShards: new Set(), spriteRef: null, spriteRequested: false };
+      state = { files: new Map(), warned: new Set(), spriteRef: null, lazyRef: null, spriteRequested: false };
       states.set(key, state);
     }
     return state;
@@ -142,7 +121,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
   function accepts(id: string): boolean {
     if (id.includes("?") || id.includes("\0")) return false;
-    return (options.framework?.include(id) ?? false) || SOURCE_FILE_RE.test(id);
+    return SOURCE_FILE_RE.test(id);
   }
 
   function record(state: EnvState, id: string, code: string, mode: string, warn: (message: string) => void): TransformAnalysis | null {
@@ -150,14 +129,8 @@ export default function znaki(options: ZnakiOptions): Plugin {
     let dynamic = false;
     let analysis: TransformAnalysis | null = null;
 
-    const custom = options.framework?.include(id) ? options.framework.scan(code, id) : null;
-    if (custom) {
-      for (const name of custom.names) names.add(name);
-      dynamic = custom.dynamic;
-    }
-
     if (SOURCE_FILE_RE.test(id)) {
-      const compiled = compileIcons(code, id, { target, lazy: lazyEnabled });
+      const compiled = compileIcons(code, id);
       if (compiled) {
         for (const name of compiled.names) names.add(name);
         dynamic = dynamic || compiled.dynamic;
@@ -199,7 +172,15 @@ export default function znaki(options: ZnakiOptions): Plugin {
           await collectDir(full, state, mode, warn);
           return;
         }
-        if (accepts(full)) record(state, full, await readFile(full, "utf-8"), mode, warn);
+        if (accepts(full)) {
+          let code: string;
+          try {
+            code = await readFile(full, "utf-8");
+          } catch {
+            return;
+          }
+          record(state, full, code, mode, warn);
+        }
       }),
     );
   }
@@ -216,7 +197,8 @@ export default function znaki(options: ZnakiOptions): Plugin {
     const [beforeSprite, beforeLazy] = before.split("\n");
     const [afterSprite, afterLazy] = after.split("\n");
     if (afterSprite !== beforeSprite) spriteVersion += 1;
-    return [...pending, ...invalidateVirtual(environment, state.loadedShards, afterLazy !== beforeLazy)];
+    if (afterLazy !== beforeLazy) lazyVersion += 1;
+    return [...pending, ...invalidateVirtual(environment)];
   }
 
   return {
@@ -225,33 +207,34 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
     configResolved(config) {
       base = config.base;
-      componentPath = normalizePath(resolve(config.root, ".znaki", `component-${target}.tsx`));
       dtsPath = options.dts === false ? false : resolve(config.root, options.dts ?? "znaki.d.ts");
       excludedPaths = new Set([config.build.outDir, ...(options.exclude ?? [])].map((dir) => normalizePath(resolve(config.root, dir))));
     },
 
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
-        if (!isDevSpriteRequest(request.url, base)) {
+        const asset = devAssetRequest(request.url, base);
+        if (!asset) {
           next();
           return;
         }
         response.setHeader("Content-Type", "image/svg+xml");
         response.setHeader("Cache-Control", "no-cache");
         const state = states.get("client") ?? [...states.values()][0];
-        const names = state ? manifestFor(state).sprite : [];
+        const manifest = state ? manifestFor(state) : { sprite: [], lazy: [] };
+        const names = asset === "sprite" ? manifest.sprite : manifest.lazy;
         response.end(spriteMarkup(collectEntries(registry, names)));
       });
     },
 
     async buildStart() {
-      const state: EnvState = { files: new Map(), warned: new Set(), loadedShards: new Set(), spriteRef: null, spriteRequested: false };
+      const state: EnvState = { files: new Map(), warned: new Set(), spriteRef: null, lazyRef: null, spriteRequested: false };
       states.set(`${this.environment.name}`, state);
       const root = this.environment.config.root;
       const mode = this.environment.mode;
       registry.init(root);
       checkCollisions();
-      if (dtsPath) writeDts(dtsPath, registry.names(), target);
+      if (dtsPath) writeDts(dtsPath, registry.names());
       reportExplicitMissing(state, mode, (message) => this.warn(message));
       const warn = (message: string): void => this.warn(message);
       await Promise.all(
@@ -265,9 +248,6 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
     resolveId(id) {
       if (id === SPRITE_ID) return SPRITE_RESOLVED;
-      if (id === REGISTRY_ID) return REGISTRY_RESOLVED;
-      if (id.startsWith(SHARD_PREFIX)) return `\0${id}`;
-      if (id === COMPONENT_ID || id === componentPath || id === `/.znaki/component-${target}.tsx`) return componentPath;
       return null;
     },
 
@@ -277,33 +257,22 @@ export default function znaki(options: ZnakiOptions): Plugin {
       if (id === SPRITE_RESOLVED) {
         const manifest = manifestFor(state);
         if (mode === "dev") {
-          return spriteModuleCode(JSON.stringify(`${base}${DEV_SPRITE_PATH.slice(1)}?v=${spriteVersion}`), manifest.sprite);
+          return spriteModuleCode(
+            JSON.stringify(`${base}${DEV_SPRITE_PATH.slice(1)}?v=${spriteVersion}`),
+            JSON.stringify(`${base}${DEV_LAZY_PATH.slice(1)}?v=${lazyVersion}`),
+            manifest.sprite,
+            manifest.lazy,
+          );
         }
         state.spriteRequested = true;
-        return spriteModuleCode(JSON.stringify(SPRITE_URL_TOKEN), null);
+        return spriteModuleCode(JSON.stringify(SPRITE_URL_TOKEN), JSON.stringify(LAZY_URL_TOKEN), null, null);
       }
-      if (id === REGISTRY_RESOLVED) {
-        // Candidates are final here: the bundler resolves these imports at load
-        // time and renderChunk only fills payloads, never adds imports.
-        if (mode === "dev") return registryModuleCode(shardKeys(manifestFor(state).lazy));
-        return registryModuleCode(shardKeys(expandPatterns(lazyPatterns, registry.names())));
-      }
-      if (id.startsWith(SHARD_PREFIX_RESOLVED)) {
-        const key = shardName(id);
-        state.loadedShards.add(key);
-        if (mode === "dev") {
-          const names = manifestFor(state).lazy.filter((name) => shardKey(name) === key);
-          return shardModuleCode(key, collectEntries(registry, names));
-        }
-        return shardModuleCode(key);
-      }
-      if (id === componentPath) return componentModule(target);
       return null;
     },
 
     transform(code, id) {
       const path = normalizePath(id);
-      if (path === componentPath || !accepts(path) || path.split("/").includes("node_modules")) return null;
+      if (!accepts(path) || path.split("/").includes("node_modules")) return null;
       const state = stateFor(this.environment);
       const mode = this.environment.mode;
       const before = snapshot(state);
@@ -313,7 +282,8 @@ export default function znaki(options: ZnakiOptions): Plugin {
         const [beforeSprite, beforeLazy] = before.split("\n");
         const [afterSprite, afterLazy] = after.split("\n");
         if (afterSprite !== beforeSprite) spriteVersion += 1;
-        invalidateVirtual(this.environment, state.loadedShards, afterLazy !== beforeLazy);
+        if (afterLazy !== beforeLazy) lazyVersion += 1;
+        invalidateVirtual(this.environment);
       }
       if (!analysis) return null;
       return { code: analysis.code, map: analysis.map };
@@ -329,31 +299,29 @@ export default function znaki(options: ZnakiOptions): Plugin {
         name: "znaki-sprite.svg",
         source: spriteMarkup(collectEntries(registry, manifest.sprite)),
       });
+      state.lazyRef = this.emitFile({
+        type: "asset",
+        name: "znaki-lazy.svg",
+        source: spriteMarkup(collectEntries(registry, manifest.lazy)),
+      });
     },
 
     renderChunk(code, chunk) {
       // Fill JSON.parse("marker") payloads before chunk hashes are computed, so
-      // transform order never changes delivery. Imports are untouched: registry
-      // shards were resolved by the bundler, only string payloads are replaced.
+      // transform order never changes delivery.
       if (this.environment.mode === "dev") return null;
       if (!code.includes("__ZNAKI_")) return null;
       const state = states.get(`${this.environment.name}`);
       if (!state) return null;
       const manifest = manifestFor(state);
-      const shards = groupByShard(collectEntries(registry, manifest.lazy));
       const output = new MagicString(code);
       let touched = inject(output, code, JSON.stringify(SPRITE_TOKEN), JSON.stringify(JSON.stringify(manifest.sprite)));
+      touched = inject(output, code, JSON.stringify(LAZY_TOKEN), JSON.stringify(JSON.stringify(manifest.lazy))) || touched;
       if (state.spriteRef) {
-        const fileName = this.getFileName(state.spriteRef);
-        const url =
-          base === "" || base === "./"
-            ? `new URL(${JSON.stringify(posix.relative(posix.dirname(chunk.fileName), fileName))}, import.meta.url).href`
-            : JSON.stringify(`${base}${fileName}`);
-        touched = inject(output, code, JSON.stringify(SPRITE_URL_TOKEN), url) || touched;
+        touched = inject(output, code, JSON.stringify(SPRITE_URL_TOKEN), assetUrl(this, state.spriteRef, chunk.fileName, base)) || touched;
       }
-      for (const key of shardKeys(expandPatterns(lazyPatterns, registry.names()))) {
-        const payload = Object.fromEntries(shards.get(key) ?? []);
-        touched = inject(output, code, JSON.stringify(shardToken(key)), JSON.stringify(JSON.stringify(payload))) || touched;
+      if (state.lazyRef) {
+        touched = inject(output, code, JSON.stringify(LAZY_URL_TOKEN), assetUrl(this, state.lazyRef, chunk.fileName, base)) || touched;
       }
       if (!touched) return null;
       return { code: output.toString(), map: output.generateMap({ source: chunk.fileName, hires: true, includeContent: true }) };
@@ -372,7 +340,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
           registry.init(environment.config.root);
           state.warned.clear();
           checkCollisions();
-          if (dtsPath) writeDts(dtsPath, registry.names(), target);
+          if (dtsPath) writeDts(dtsPath, registry.names());
           reportExplicitMissing(state, environment.mode, warn);
           await Promise.all(
             [...state.files.keys()].map(async (tracked) => {
@@ -387,10 +355,10 @@ export default function znaki(options: ZnakiOptions): Plugin {
             }),
           );
           // Source content can change invisibly to name snapshots (same names,
-          // new geometry), so force a fresh sprite URL and invalidate the
-          // sprite, registry, and every loaded shard.
+          // new geometry), so force fresh asset URLs and invalidate the sprite module.
           spriteVersion += 1;
-          return [...(modules as EnvironmentModuleNode[]), ...invalidateVirtual(environment, state.loadedShards, true)];
+          lazyVersion += 1;
+          return [...(modules as EnvironmentModuleNode[]), ...invalidateVirtual(environment)];
         })();
       }
 
@@ -403,11 +371,21 @@ export default function znaki(options: ZnakiOptions): Plugin {
   };
 }
 
-function isDevSpriteRequest(url: string | undefined, base: string): boolean {
-  if (!url) return false;
+function devAssetRequest(url: string | undefined, base: string): "sprite" | "lazy" | null {
+  if (!url) return null;
   const path = url.split("?")[0];
-  const withBase = `${base.replace(/\/$/, "")}${DEV_SPRITE_PATH}`;
-  return path === DEV_SPRITE_PATH || path === withBase;
+  const prefix = base.replace(/\/$/, "");
+  if (path === DEV_SPRITE_PATH || path === `${prefix}${DEV_SPRITE_PATH}`) return "sprite";
+  if (path === DEV_LAZY_PATH || path === `${prefix}${DEV_LAZY_PATH}`) return "lazy";
+  return null;
+}
+
+function assetUrl(context: { getFileName(referenceId: string): string }, referenceId: string, chunkFileName: string, base: string): string {
+  const fileName = context.getFileName(referenceId);
+  if (base === "" || base === "./") {
+    return `new URL(${JSON.stringify(posix.relative(posix.dirname(chunkFileName), fileName))}, import.meta.url).href`;
+  }
+  return JSON.stringify(`${base}${fileName}`);
 }
 
 function inject(output: MagicString, source: string, search: string, replacement: string): boolean {
@@ -422,25 +400,9 @@ function inject(output: MagicString, source: string, search: string, replacement
   }
 }
 
-function invalidateVirtual(
-  environment: { moduleGraph: EnvironmentModuleGraph },
-  shards: Set<string>,
-  registryChanged: boolean,
-): EnvironmentModuleNode[] {
-  const affected: EnvironmentModuleNode[] = [];
+function invalidateVirtual(environment: { moduleGraph: EnvironmentModuleGraph }): EnvironmentModuleNode[] {
   const sprite = environment.moduleGraph.getModuleById(SPRITE_RESOLVED);
-  if (sprite) {
-    environment.moduleGraph.invalidateModule(sprite);
-    affected.push(sprite);
-  }
-  if (registryChanged) {
-    for (const id of [REGISTRY_RESOLVED, ...[...shards].map((key) => `\0virtual:znaki/shard/${key}`)]) {
-      const module = environment.moduleGraph.getModuleById(id);
-      if (module) {
-        environment.moduleGraph.invalidateModule(module);
-        affected.push(module);
-      }
-    }
-  }
-  return affected;
+  if (!sprite) return [];
+  environment.moduleGraph.invalidateModule(sprite);
+  return [sprite];
 }

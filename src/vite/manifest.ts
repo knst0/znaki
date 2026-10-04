@@ -1,28 +1,10 @@
 import type { IconSource } from "./source.ts";
 
-export type ZnakiTarget = "react" | "solid" | "reze";
-
-export interface FrameworkScanResult {
-  names: Iterable<string>;
-  dynamic: boolean;
-}
-
-export interface FrameworkIntegration {
-  /** Receives a normalized absolute file path, without a query string. */
-  include: (id: string) => boolean;
-  /** Analyze original source for collection; errors fail the build rather than dropping icons. */
-  scan: (code: string, id: string) => FrameworkScanResult;
-}
-
 export interface ZnakiOptions {
   sources: IconSource[];
-  /** Custom collection-only format support (include + scan), unioned with compiler results. */
-  framework?: FrameworkIntegration;
-  /** JSX backend for compiler output and generated types. Defaults to "react". */
-  target?: ZnakiTarget;
   /** Always include in the sprite. Exact names or "*" wildcard patterns; exact means exact, no implicit prefix matching. */
   includeIcons?: string[];
-  /** Allow lazy delivery. Exact names or "*" wildcard patterns; matches already in the sprite stay out of the lazy registry. */
+  /** Separate SVG sprite requested on first use. Static sprite delivery takes precedence. */
   lazyIcons?: string[];
   /** Directories to scan initially for icon usage. Defaults to the Vite root. */
   include?: string[];

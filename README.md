@@ -1,6 +1,6 @@
 # znaki
 
-Typesafe SVG icons for Vite. Use Lucide, Tabler, your own SVG files, or a custom icon library with React, Solid or reze.
+Typesafe SVG icons for Vite. Framework-independent JSX compilation with Lucide, Tabler, your own SVG files, or a custom icon library. Every icon renders as `<svg><use /></svg>`.
 
 ## Quick start
 
@@ -20,7 +20,6 @@ import znaki, { lucide } from "znaki/vite";
 export default defineConfig({
   plugins: [
     znaki({
-      target: "react",
       sources: [lucide()],
     }),
     react(),
@@ -28,7 +27,7 @@ export default defineConfig({
 });
 ```
 
-For Solid or reze, set `target: "solid"` or `target: "reze"` and use your framework's Vite plugin instead of `react()`.
+Use your application's JSX plugin (React, Solid, reze, etc.). znaki does not select a rendering backend or import framework runtime APIs. Only `.jsx` and `.tsx` sources are supported.
 
 Add `"znaki/client"` to your existing TypeScript `types` list and `"znaki.d.ts"` to `include`:
 
@@ -47,11 +46,22 @@ import { Icon } from "znaki";
 <Icon name="lucide:arrow-right" size={24} />;
 ```
 
-Icon names are autocompleted and checked by TypeScript. Run Vite or a build before typechecking a fresh checkout. Use one framework target per TypeScript project.
+Icon names are autocompleted and checked by TypeScript. Run Vite or a build before typechecking a fresh checkout. Generated declarations contain the icon-name catalogue, not framework-specific types.
 
 ## Size, color and accessibility
 
-`Icon` accepts your framework's SVG attributes, event handlers and refs.
+`Icon` forwards SVG attributes, event handlers and refs to the generated `<svg>`. Its default attribute types are framework-neutral. For native attribute completion and contextual event types, augment `IconAttributes` in your application's declaration file; for example, with React:
+
+```ts
+import type { SVGProps } from "react";
+import "znaki";
+
+declare module "znaki" {
+  interface IconAttributes extends Omit<SVGProps<SVGSVGElement>, "name" | "children" | "dangerouslySetInnerHTML"> {}
+}
+```
+
+For another JSX implementation, extend its SVG attribute type instead. This is a type-only integration; znaki's compiler and runtime remain unchanged.
 
 ```tsx
 import { Icon } from "znaki";
@@ -194,10 +204,10 @@ znaki({
 });
 ```
 
-- **`includeIcons`** loads the matching icons together. Use it for navigation, common controls, and other icons you want available immediately.
-- **`lazyIcons`** loads matching icons on demand. Use it for larger sets that are not needed on every page.
+- **`includeIcons`** puts matching icons in the main sprite, together with statically discovered icons.
+- **`lazyIcons`** puts matching icons in one separate SVG sprite. The browser loads that whole file when a `<use>` first references one of its icons; other icons use the same file. There are no shards, JS icon chunks, or inline-markup renderers.
 - An exact name matches only that icon. `*` matches any sequence of characters; `"lucide:*"` selects the whole Lucide catalogue.
-- Icons used by literal name are loaded with the shared icon file, even if they also match `lazyIcons`.
+- Static delivery wins: literal names, finite conditionals and `includeIcons` stay in the main sprite even when they match `lazyIcons`.
 
 Type dynamic values as `IconName`:
 
@@ -212,29 +222,25 @@ function MenuIcon(props: { name: IconName }) {
 
 TypeScript checks names, but does not configure loading: `includeIcons` or `lazyIcons` is still required for this wrapper. Validate names received from external data before using them.
 
-For server-rendered reze pages, use `includeIcons` rather than `lazyIcons`. The reze on-demand renderer is client-only.
+Both paths emit `<svg><use href="…svg#symbol-id" /></svg>` and work without framework-specific loading components. `PreloadSprite` preloads only the main sprite.
 
 ## Configuration reference
 
 | Option           | Default        | Purpose                                               |
 | ---------------- | -------------- | ----------------------------------------------------- |
 | `sources`        | required       | Icon libraries and local directories                  |
-| `target`         | `"react"`      | `"react"`, `"solid"` or `"reze"`                      |
 | `includeIcons`   | `[]`           | Names or `*` patterns to load together                |
 | `lazyIcons`      | `[]`           | Names or `*` patterns to load on demand               |
 | `allowOverrides` | `false`        | Prefer the first source when names overlap            |
 | `dts`            | `"znaki.d.ts"` | Generated type file path; `false` disables generation |
 | `include`        | project root   | Directories to search for icon usage at startup       |
 | `exclude`        | `[]`           | Additional directories to skip during that search     |
-| `framework`      | —              | A usage scanner for additional template formats       |
-
-For non-JSX templates, `framework` accepts `include(id)` and `scan(code, id)` callbacks. Return `{ names, dynamic }` from `scan`, where `names` contains full icon names and `dynamic` indicates names not known in advance. You still need your template integration to render the icons; registering a scanner does not add template rendering support.
 
 ## Troubleshooting
 
 ### TypeScript cannot find `Icon` or rejects a new icon name
 
-Start Vite or run a build to regenerate `znaki.d.ts`. Check that the file is included in your TypeScript project and that `target` matches your framework.
+Start Vite or run a build to regenerate `znaki.d.ts`. Check that it is included in your TypeScript project. If native SVG attributes lack completion, add the type-only `IconAttributes` augmentation described above.
 
 ### An icon cannot be found
 
@@ -255,12 +261,13 @@ Use presentation attributes such as `fill` and `stroke` instead of `<style>` ele
 ## Migrating from 0.x
 
 - Import `Icon` and `PreloadSprite` from `znaki` instead of `znaki/react` or `znaki/solid`.
-- Set `target` and place znaki before your framework plugin.
+- Remove `target` and place znaki before your application's JSX plugin.
 - Regenerate `znaki.d.ts` and include it in your TypeScript project.
 - Replace `dynamic` prefixes with `includeIcons`/`lazyIcons` and explicit `*` patterns.
 - Replace `component: "MyIcon"` with `import { Icon as MyIcon } from "znaki"`.
-- Update custom scanners to return `{ names, dynamic }`; `literals` and `prefixes` are no longer supported.
+- Remove custom `framework` scanners; only JSX sources are supported.
 - Add dimensions to SVGs that lack them. Resolve duplicate source names or opt into `allowOverrides`.
+- Replace `loadIcon`, `isSpriteName`, `scopeIcon` and shard-based integrations with `spriteHref(name)` from `znaki/runtime` when constructing `<use>` references manually. `lazyIcons` now produces one external SVG sprite.
 
 ## License
 

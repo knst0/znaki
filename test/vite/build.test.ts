@@ -60,23 +60,41 @@ describe("production manifest", () => {
 
   it("emits a valid empty sprite when only the URL is requested", async () => {
     project.file("main.tsx", `export * from "virtual:znaki/sprite";`);
-    expect(symbols((await bundle({ sources: [memorySource()], dts: false })).sprite)).toHaveLength(0);
+    const { sprite, lazy } = await bundle({ sources: [memorySource()], dts: false });
+    expect(symbols(sprite)).toHaveLength(0);
+    expect(symbols(lazy)).toHaveLength(0);
   });
 });
 
 describe("lazy delivery", () => {
-  it("includes explicitly lazy icons even without a dynamic component and excludes sprite icons", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/registry"; export * from "virtual:znaki/sprite";`);
-    const { output, sprite } = await bundle({ sources: [memorySource()], includeIcons: ["i:home"], lazyIcons: ["i:*"], dts: false });
-    const chunks = output.filter((item) => item.type === "chunk" && item.isDynamicEntry);
-    const entries: Record<string, unknown> = {};
-    for (const chunk of chunks) {
-      if (chunk.type !== "chunk") continue;
-      const loaded = await import(`data:text/javascript;base64,${Buffer.from(chunk.code).toString("base64")}`);
-      Object.assign(entries, loaded.default);
-    }
-    expect(Object.keys(entries).sort()).toEqual(["i:quoted", "i:user"]);
+  it("emits lazy icons in a separate sprite file the browser fetches through use href", async () => {
+    project.file(
+      "main.tsx",
+      `import { Icon } from "znaki";
+      export const A = () => <Icon name="i:home"/>;
+      export const B = (props) => <Icon name={props.name}/>;
+      export * from "virtual:znaki/sprite";`,
+    );
+    const { sprite, lazy, chunk, assets } = await bundle({
+      sources: [memorySource()],
+      includeIcons: ["i:home"],
+      lazyIcons: ["i:*"],
+      dts: false,
+    });
+    // Static delivery wins: home stays in the main sprite, out of the lazy file.
     expect(symbols(sprite)).toHaveLength(1);
+    expect(sprite).toContain('id="znaki-i_3a_home"');
+    expect(sprite).not.toContain("znaki-i_3a_user");
+    const lazyIds = [...symbols(lazy)].map((node) => node.getAttribute("id"));
+    expect(lazyIds).toEqual(expect.arrayContaining(["znaki-i_3a_quoted", "znaki-i_3a_user"]));
+    expect(lazyIds).toHaveLength(2);
+    // Emitted URLs point at the real hashed files so hashed bases resolve.
+    const spriteFile = assets.find((asset) => asset.fileName.includes("sprite"))?.fileName ?? "";
+    const lazyFile = assets.find((asset) => asset.fileName.includes("lazy"))?.fileName ?? "";
+    expect(spriteFile).not.toBe("");
+    expect(lazyFile).not.toBe("");
+    expect(chunk).toContain(spriteFile);
+    expect(chunk).toContain(lazyFile);
   });
 });
 

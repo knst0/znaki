@@ -35,11 +35,17 @@ describe("development delivery", () => {
     expect(await (await harness.request("/@znaki/sprite.svg")).text()).toContain('id="znaki-i_3a_user"');
   });
 
-  it("serves an explicit lazy set without requiring a dynamic JSX usage", async () => {
+  it("serves an explicit lazy set from its own endpoint without a JSX usage", async () => {
     project.file("main.tsx", `export const n = 1;`);
     harness = await createDevHarness({ root: project.root, sources: [memorySource()], options: { lazyIcons: ["i:user"] } });
-    const registry = await harness.transform("virtual:znaki/registry");
-    expect(registry).toContain("i-us");
-    expect(registry).not.toContain("i-ho");
+    const module = await harness.transform("virtual:znaki/sprite");
+    expect(module).toContain("lazySpriteUrl");
+    expect(module).toContain("i:user");
+    const response = await harness.request("/@znaki/lazy.svg");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/svg+xml");
+    const body = await response.text();
+    expect(body).toContain('id="znaki-i_3a_user"');
+    expect(body).not.toContain('id="znaki-i_3a_home"');
   });
 });

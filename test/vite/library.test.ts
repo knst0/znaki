@@ -11,7 +11,7 @@ import { createHotHarness } from "../helpers/hot.ts";
 const project = useProject("znaki-library");
 
 describe("custom icon library parser", () => {
-  it("normalizes parsed SVG and structured data into sprite, lazy data and generated names", async () => {
+  it("normalizes parsed SVG and structured data into sprite, lazy file and generated names", async () => {
     const catalogue = { home: { width: 32, height: 16, radius: 2 }, user: { width: 48, height: 24, radius: 4 } };
     const source = library({
       prefix: "custom",
@@ -24,7 +24,7 @@ describe("custom icon library parser", () => {
     });
     project.file(
       "main.tsx",
-      `import { Icon } from "znaki"; export const C = () => <Icon name="custom:home"/>; export * from "virtual:znaki/registry";`,
+      `import { Icon } from "znaki"; export const C = () => <Icon name="custom:home"/>; export * from "virtual:znaki/sprite";`,
     );
     const result = await buildProject({ root: project.root, options: { sources: [source], lazyIcons: ["custom:user"] } });
     expect(result.sprite).toContain('viewBox="0 0 32 16"');
@@ -33,12 +33,11 @@ describe("custom icon library parser", () => {
     const declarations = readFileSync(join(project.root, "znaki.d.ts"), "utf8");
     expect(declarations).toContain('"custom:home"');
     expect(declarations).toContain('"custom:user"');
-    const shard = result.output.find((item) => item.type === "chunk" && item.isDynamicEntry);
-    if (!shard || shard.type !== "chunk") throw new Error("missing custom library shard");
-    // Load the emitted shard, whose path and code are selected by the bundler.
-    const module = await import(`data:text/javascript;base64,${Buffer.from(shard.code).toString("base64")}`);
-    expect(module.default["custom:user"].viewBox).toBe("0 0 48 24");
-    expect(module.default["custom:user"].body).toContain('r="4"');
+    expect(result.lazy).toContain('viewBox="0 0 48 24"');
+    expect(result.lazy).toContain('r="4"');
+    const lazyFile = result.assets.find((item) => item.fileName.includes("lazy"))?.fileName ?? "";
+    expect(lazyFile).not.toBe("");
+    expect(result.chunk).toContain(lazyFile);
   });
 
   it("reloads a watched catalogue and regenerates names", async () => {
