@@ -208,6 +208,7 @@ znaki({
 - **`lazyIcons`** puts matching icons in one separate SVG sprite. The browser loads that whole file when a `<use>` first references one of its icons; other icons use the same file. There are no shards, JS icon chunks, or inline-markup renderers.
 - An exact name matches only that icon. `*` matches any sequence of characters; `"lucide:*"` selects the whole Lucide catalogue.
 - Static delivery wins: literal names, finite conditionals and `includeIcons` stay in the main sprite even when they match `lazyIcons`.
+- A dynamic `name` with neither list configured emits one warning per file with its location, naming `includeIcons` or `lazyIcons` to fix delivery. Literal names and finite conditionals never emit this warning.
 
 Type dynamic values as `IconName`:
 

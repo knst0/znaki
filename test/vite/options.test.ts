@@ -45,3 +45,49 @@ describe("source precedence", () => {
     expect(sprite).not.toContain("<circle");
   });
 });
+
+describe("dynamic delivery warning", () => {
+  const dynamicPage = `import { Icon } from "znaki";
+export const C = (props: { name: string }) => (
+  <Icon name={props.name}/>
+);`;
+
+  it("warns once with a source location when a dynamic name has no explicit delivery", async () => {
+    project.file("page.tsx", dynamicPage);
+    project.file(
+      "main.tsx",
+      `export { C } from "./page.tsx?pick=C&lang.tsx";
+export { C as Other } from "./page.tsx?pick=C&mode=alternate";`,
+    );
+    const { warnings, sprite, lazy } = await buildProject({ root: project.root, options: { sources: [memorySource()], dts: false } });
+    // The initial scan and distinct query transforms share one source warning.
+    const dynamicWarnings = warnings.filter((warning) => warning.includes("dynamic icon name"));
+    expect(dynamicWarnings).toHaveLength(1);
+    expect(dynamicWarnings[0]).toContain("page.tsx:3:15");
+    expect(dynamicWarnings[0]).toContain("includeIcons");
+    expect(dynamicWarnings[0]).toContain("lazyIcons");
+    expect(sprite).not.toContain("<symbol");
+    expect(lazy).not.toContain("<symbol");
+  });
+
+  it.each([
+    ["includeIcons", { includeIcons: ["i:home"] }],
+    ["lazyIcons", { lazyIcons: ["i:home"] }],
+  ])("stays silent when %s configures delivery", async (_label, delivery) => {
+    project.file("main.tsx", dynamicPage);
+    const { warnings } = await buildProject({ root: project.root, options: { sources: [memorySource()], dts: false, ...delivery } });
+    expect(warnings.filter((warning) => warning.includes("dynamic icon name"))).toEqual([]);
+  });
+
+  it.each([
+    ["literal", `import { Icon } from "znaki"; export const C = () => <Icon name="i:home"/>;`],
+    [
+      "finite conditional",
+      `import { Icon } from "znaki"; export const C = (props: { active: boolean }) => <Icon name={props.active ? "i:home" : "i:user"}/>;`,
+    ],
+  ])("stays silent for a static %s without explicit delivery", async (_label, code) => {
+    project.file("main.tsx", code);
+    const { warnings } = await buildProject({ root: project.root, options: { sources: [memorySource()], dts: false } });
+    expect(warnings.filter((warning) => warning.includes("dynamic icon name"))).toEqual([]);
+  });
+});

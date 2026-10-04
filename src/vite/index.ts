@@ -120,20 +120,26 @@ export default function znaki(options: ZnakiOptions): Plugin {
   }
 
   function accepts(id: string): boolean {
-    if (id.includes("?") || id.includes("\0")) return false;
-    return SOURCE_FILE_RE.test(id);
+    if (id.includes("\0")) return false;
+    const queryStart = id.indexOf("?");
+    if (queryStart === -1) return SOURCE_FILE_RE.test(id);
+    if (!SOURCE_FILE_RE.test(id.slice(0, queryStart))) return false;
+    const query = new URLSearchParams(id.slice(queryStart + 1));
+    return !query.has("raw") && !query.has("url");
   }
 
   function record(state: EnvState, id: string, code: string, mode: string, warn: (message: string) => void): TransformAnalysis | null {
     const names = new Set<string>();
     let dynamic = false;
+    let dynamicLocation: string | null = null;
     let analysis: TransformAnalysis | null = null;
 
-    if (SOURCE_FILE_RE.test(id)) {
+    if (accepts(id)) {
       const compiled = compileIcons(code, id);
       if (compiled) {
         for (const name of compiled.names) names.add(name);
         dynamic = dynamic || compiled.dynamic;
+        dynamicLocation = compiled.dynamicLocation;
         analysis = { code: compiled.code, map: compiled.map };
       }
     }
@@ -157,6 +163,15 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
     if (known.size > 0 || dynamic) state.files.set(id, { names: known, dynamic });
     else state.files.delete(id);
+
+    if (dynamicLocation !== null && includePatterns.length === 0 && lazyPatterns.length === 0) {
+      const pathname = id.split("?")[0];
+      const key = `dynamic\0${pathname}`;
+      if (!state.warned.has(key)) {
+        state.warned.add(key);
+        warn(`znaki: dynamic icon name in ${id}:${dynamicLocation} needs includeIcons or lazyIcons to configure delivery`);
+      }
+    }
 
     return analysis;
   }
@@ -344,6 +359,9 @@ export default function znaki(options: ZnakiOptions): Plugin {
           reportExplicitMissing(state, environment.mode, warn);
           await Promise.all(
             [...state.files.keys()].map(async (tracked) => {
+              // Query modules contain transformed selections, not files on disk.
+              // Keep their discoveries until Vite transforms that identity again.
+              if (tracked.includes("?")) return;
               let code: string;
               try {
                 code = await readFile(tracked, "utf-8");
@@ -364,6 +382,11 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
       return Promise.resolve(read()).then((code) => {
         const before = snapshot(state);
+        // A source edit invalidates every selection of that file. Each query
+        // module will repopulate its own discoveries when transformed again.
+        for (const tracked of state.files.keys()) {
+          if (tracked.startsWith(`${path}?`)) state.files.delete(tracked);
+        }
         record(state, path, code, environment.mode, warn);
         return finishHotUpdate(state, environment, before, modules);
       });

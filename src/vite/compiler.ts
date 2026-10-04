@@ -7,6 +7,7 @@ export interface CompileIconsResult {
   map?: SourceMap;
   names: Set<string>;
   dynamic: boolean;
+  dynamicLocation: string | null;
 }
 
 const ZNAKI_SOURCE = "znaki";
@@ -35,6 +36,7 @@ interface FileState {
   taken: Set<string>;
   names: Set<string>;
   dynamic: boolean;
+  dynamicOffset: number | null;
   dirty: boolean;
   needSpriteHref: string | null;
   needSvgProps: string | null;
@@ -80,6 +82,7 @@ export function compileIcons(code: string, id: string): CompileIconsResult | nul
     taken: new Set(),
     names: new Set(),
     dynamic: false,
+    dynamicOffset: null,
     dirty: false,
     needSpriteHref: null,
     needSvgProps: null,
@@ -113,6 +116,7 @@ export function compileIcons(code: string, id: string): CompileIconsResult | nul
     map: file.ms.generateMap({ source: id, hires: true, includeContent: true }),
     names: file.names,
     dynamic: file.dynamic,
+    dynamicLocation: file.dynamicOffset === null ? null : offsetToLineCol(file.code, file.dynamicOffset),
   };
 }
 
@@ -604,6 +608,7 @@ function lowerIntrinsic(element: N, opening: N, kind: BindingKind, namespace: st
   if (sizeAttr && !nodeField(sizeAttr.node, "value")) {
     fail(file, sizeAttr.node, `<${display}> "size" requires a value`);
   }
+  let dynamicNode: N | null = null;
   if (nameAttr) {
     const nameNode = nameExpression(nameAttr);
     if (!nameNode) {
@@ -611,11 +616,15 @@ function lowerIntrinsic(element: N, opening: N, kind: BindingKind, namespace: st
     }
     const info = resolveName(nameNode);
     for (const name of info.names) file.names.add(name);
-    if (info.dynamic) file.dynamic = true;
+    if (info.dynamic) dynamicNode = nameNode;
   } else {
-    file.dynamic = true;
+    dynamicNode = element;
   }
-  if (hasSpread) file.dynamic = true;
+  if (hasSpread && !dynamicNode) dynamicNode = element;
+  if (dynamicNode) {
+    file.dynamic = true;
+    file.dynamicOffset ??= dynamicNode.start;
+  }
   file.ms.overwrite(element.start, element.end, lowerIconSvg(attrs, nameAttr, sizeAttr, display, file));
   file.dirty = true;
 }
