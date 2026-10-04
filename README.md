@@ -266,9 +266,7 @@ Use presentation attributes such as `fill` and `stroke` instead of `<style>` ele
 - Regenerate `znaki.d.ts` and include it in your TypeScript project.
 - Replace `dynamic` prefixes with `includeIcons`/`lazyIcons` and explicit `*` patterns.
 - Replace `component: "MyIcon"` with `import { Icon as MyIcon } from "znaki"`.
-- Remove custom `framework` scanners; only JSX sources are supported.
 - Add dimensions to SVGs that lack them. Resolve duplicate source names or opt into `allowOverrides`.
-- Replace `loadIcon`, `isSpriteName`, `scopeIcon` and shard-based integrations with `spriteHref(name)` from `znaki/runtime` when constructing `<use>` references manually. `lazyIcons` now produces one external SVG sprite.
 
 ## License
 
