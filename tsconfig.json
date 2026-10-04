@@ -18,7 +18,8 @@
     "types": ["node"],
     "allowImportingTsExtensions": true,
     "paths": {
-      "znaki": ["./src/index.ts"]
+      "znaki": ["./src/index.ts"],
+      "znaki/runtime": ["./src/runtime/index.ts"]
     }
   },
   "include": ["src", "test", "tsdown.config.ts", "vitest.config.ts"],

@@ -37,6 +37,10 @@
       "types": "./dist/vite/index.d.ts",
       "default": "./dist/vite/index.js"
     },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "default": "./dist/runtime/index.js"
+    },
     "./solid": {
       "types": "./dist/solid/index.d.ts",
       "solid": "./dist/solid/index.jsx",

@@ -92,16 +92,80 @@ The registry is split into shards grouped by source prefix and the first two cha
 name, so one lookup pulls in a small chunk instead of a chunk per icon. Icons already in the
 sprite never end up in the registry.
 
+## Custom frameworks
+
+Use `znaki/runtime` to build a component without depending on React or Solid:
+
+```ts
+import { isSpriteName, loadIcon, spriteUrl, symbolId } from "znaki/runtime";
+```
+
+- If `isSpriteName(name)` is true, render an SVG containing
+  `<use href={spriteUrl + "#" + symbolId(name)} />`. No asynchronous lookup is needed.
+- Otherwise, await `loadIcon(name)`. It returns `{ body, viewBox, attrs }`, or `null`
+  for a name outside the generated registry. Apply the SVG attributes and viewBox,
+  then insert the trusted source SVG body using your framework's raw SVG facility.
+  Never insert untrusted API text as SVG markup.
+- Handle `null`, rejected loads and stale asynchronous results in your component.
+  `loadIcon` returns the same promise for repeated calls with the same name, including
+  rejected promises. The cache is shared by components using the same runtime instance.
+- Set size and accessibility attributes in your component. For preload support, render
+  `<link rel="preload" href={spriteUrl} as="image" type="image/svg+xml">`.
+
+The runtime requires the Vite plugin and `znaki/client` types. The root `znaki`
+entry remains independent of virtual modules and exports `IconName` and `IconData`.
+Sprite icons are excluded from the lazy registry: check `isSpriteName` before loading.
+
+JSX-based custom components work with the existing `component` option. For other
+source formats, provide a synchronous `FrameworkIntegration`. For example, a
+declarative UI that stores icon usage in `.icons` JSON files can use:
+
+```ts
+import znaki, { tabler } from "znaki/vite";
+import type { FrameworkIntegration, FrameworkScanResult } from "znaki/vite";
+
+const framework: FrameworkIntegration = {
+  include: (id) => id.endsWith(".icons"),
+  scan: (code): FrameworkScanResult => JSON.parse(code),
+};
+
+// page.icons:
+// { "names": ["tabler:home"], "dynamic": true,
+//   "literals": ["tabler:user"], "prefixes": ["tabler:arrow-"] }
+
+znaki({ sources: [tabler()], framework });
+```
+
+For a template language, implement `scan(code, id, component)` using that language's
+parser. `id` is a normalized absolute file path; `component` is the configured tag name.
+Return `names` (statically resolved icon names), `dynamic` (whether unresolved icon
+usage exists), and optionally `literals` (candidate icon strings) and `prefixes`
+(runtime-built name prefixes). All name collections accept iterables.
+
+Matching files use the custom scanner instead of the JSX scanner; unmatched JSX files
+keep the built-in behavior. Custom results participate in the same sprite pruning,
+dynamic allowlist, warnings and hot updates. Literal candidates only enter the sprite
+when dynamic usage exists somewhere in the scanned project. Prefixes and `dynamic`
+options only enable lazy delivery when such usage exists.
+
+The scanner runs on original source during directory collection, transforms and hot
+updates, so it must be deterministic and tolerate repeated calls. Parser errors fail
+the operation rather than silently dropping icons. Virtual modules and query-bearing
+submodules are not scanned. Existing directory exclusions still apply to initial
+collection. Put `znaki()` before your framework compiler in the Vite plugin list.
+This API supplies integration hooks, not a bundled Vue/Svelte/template parser.
+
 ## Options
 
-| Option      | Default        | Description                                      |
-| ----------- | -------------- | ------------------------------------------------ |
-| `sources`   | —              | Icon sources, resolved in order                  |
-| `component` | `"Icon"`       | JSX tag name the scanner looks for               |
-| `dynamic`   | `[]`           | Names or prefixes reachable through the registry |
-| `dts`       | `"znaki.d.ts"` | Where to write the generated names, or `false`   |
-| `include`   | project root   | Directories to scan for icon usage               |
-| `exclude`   | —              | Extra directories to skip while scanning         |
+| Option      | Default        | Description                                                |
+| ----------- | -------------- | ---------------------------------------------------------- |
+| `sources`   | —              | Icon sources, resolved in order                            |
+| `component` | `"Icon"`       | JSX tag name the scanner looks for                         |
+| `framework` | —              | Custom source filter and scanner; JSX remains the fallback |
+| `dynamic`   | `[]`           | Names or prefixes reachable through the registry           |
+| `dts`       | `"znaki.d.ts"` | Where to write the generated names, or `false`             |
+| `include`   | project root   | Directories to scan for icon usage                         |
+| `exclude`   | —              | Extra directories to skip while scanning                   |
 
 Scanning always skips `node_modules`, dot directories, `build.outDir` and the usual output
 directories (`dist`, `build`, `coverage`, `storybook-static`).

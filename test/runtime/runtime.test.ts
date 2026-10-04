@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isSpriteName, loadIcon } from "../../src/react/loader.ts";
+import { isSpriteName, loadIcon } from "../../src/runtime/index.ts";
 import { lazyIcon } from "../fixtures/virtual.ts";
 
 describe("isSpriteName", () => {

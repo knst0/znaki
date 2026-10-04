@@ -1,11 +1,8 @@
 import type { JSX } from "@solidjs/web";
 import { Loading, Show } from "@solidjs/web";
 import { createMemo, omit } from "solid-js";
-import { spriteUrl } from "virtual:znaki/sprite";
 import type { IconData, IconName } from "znaki";
-import { symbolId } from "znaki";
-
-import { isSpriteName, loadIcon } from "./loader.ts";
+import { isSpriteName, loadIcon, spriteUrl, symbolId } from "znaki/runtime";
 
 export interface IconProps extends Omit<JSX.SvgSVGAttributes<SVGSVGElement>, "innerHTML"> {
   name: IconName;

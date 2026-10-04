@@ -33,9 +33,24 @@ const SOURCE_FILE_RE = /\.[tj]sx$/;
 const DEV_SPRITE_PATH = "/@znaki/sprite.svg";
 const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "coverage", "storybook-static"]);
 
+export interface FrameworkScanResult {
+  names: Iterable<string>;
+  dynamic: boolean;
+  literals?: Iterable<string>;
+  prefixes?: Iterable<string>;
+}
+
+export interface FrameworkIntegration {
+  /** Receives a normalized absolute file path, without a query string. */
+  include: (id: string) => boolean;
+  /** Analyze original source; errors fail the build rather than dropping icons. */
+  scan: (code: string, id: string, component: string) => FrameworkScanResult;
+}
+
 export interface ZnakiOptions {
   sources: IconSource[];
   component?: string;
+  framework?: FrameworkIntegration;
   dynamic?: string[];
   dts?: string | false;
   include?: string[];
@@ -97,12 +112,16 @@ export default function znaki(options: ZnakiOptions): Plugin {
     return false;
   }
 
+  function accepts(id: string): boolean {
+    return !id.includes("?") && !id.includes("\0") && (options.framework?.include(id) || SOURCE_FILE_RE.test(id));
+  }
+
   function record(id: string, code: string, warn: (msg: string) => void): void {
     const names = new Set<string>();
-    let dynamic = false;
-    if (componentRe.test(code)) {
-      const scanned = scanIcons(code, component);
-      dynamic = scanned.dynamic;
+    const custom = options.framework?.include(id) ? options.framework.scan(code, id, component) : null;
+    const scanned = custom ?? (componentRe.test(code) ? scanIcons(code, component) : null);
+    const dynamic = scanned?.dynamic ?? false;
+    if (scanned) {
       for (const name of scanned.names) {
         if (registry.resolve(name)) names.add(name);
         else if (!warned.has(`${id}\0${name}`)) {
@@ -112,9 +131,13 @@ export default function znaki(options: ZnakiOptions): Plugin {
       }
     }
 
-    const scanned = scanLiterals(code);
-    const literals = new Set([...scanned.strings].filter((value) => registry.has(value)));
-    const prefixes = new Set([...scanned.prefixes].filter((prefix) => registry.names().some((name) => name.startsWith(prefix))));
+    const candidates = custom ? { strings: custom.literals ?? [], prefixes: custom.prefixes ?? [] } : scanLiterals(code);
+    const literals = new Set<string>();
+    for (const value of candidates.strings) if (registry.has(value)) literals.add(value);
+    const prefixes = new Set<string>();
+    for (const prefix of candidates.prefixes) {
+      if (registry.names().some((name) => name.startsWith(prefix))) prefixes.add(prefix);
+    }
 
     if (names.size > 0 || dynamic || literals.size > 0 || prefixes.size > 0) byFile.set(id, { names, literals, prefixes, dynamic });
     else byFile.delete(id);
@@ -128,7 +151,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
         const full = normalizePath(resolve(dir, entry.name));
         if (excludedPaths.has(full)) return;
         if (entry.isDirectory()) await collectDir(full, warn);
-        else if (SOURCE_FILE_RE.test(entry.name)) record(full, await readFile(full, "utf-8"), warn);
+        else if (accepts(full)) record(full, await readFile(full, "utf-8"), warn);
       }),
     );
   }
@@ -216,13 +239,13 @@ export default function znaki(options: ZnakiOptions): Plugin {
     },
 
     transform(code, id) {
-      if (!SOURCE_FILE_RE.test(id) || id.includes("node_modules")) return null;
+      id = normalizePath(id);
+      if (!accepts(id) || id.split("/").includes("node_modules")) return null;
 
-      const before = spriteNames();
+      const before = spriteRef ? spriteNames() : null;
       const stateBefore = snapshot();
       record(id, code, (message) => this.warn(message));
 
-      const after = spriteNames();
       const stateAfter = snapshot();
       const registryChanged = stateBefore.registry !== stateAfter.registry;
       if (this.environment.mode === "dev" && (stateBefore.sprite !== stateAfter.sprite || registryChanged)) {
@@ -230,8 +253,8 @@ export default function znaki(options: ZnakiOptions): Plugin {
         invalidateVirtual(this.environment, loadedShards, registryChanged);
       }
 
-      if (spriteRef) {
-        const late = [...after].filter((name) => !before.has(name));
+      if (before) {
+        const late = [...spriteNames()].filter((name) => !before.has(name));
         if (late.length > 0) {
           this.warn(
             `znaki: ${late.map((name) => `"${name}"`).join(", ")} found in ${id} after the sprite was emitted — add its directory to "include"`,
@@ -243,8 +266,9 @@ export default function znaki(options: ZnakiOptions): Plugin {
     },
 
     hotUpdate({ file, read, modules }) {
-      const fromSourceDir = registry.watchDirs.some((dir) => normalizePath(file).startsWith(`${dir}/`));
-      if (!fromSourceDir && (!SOURCE_FILE_RE.test(file) || file.includes("node_modules"))) return;
+      file = normalizePath(file);
+      const fromSourceDir = registry.watchDirs.some((dir) => file.startsWith(`${dir}/`));
+      if (!fromSourceDir && (!accepts(file) || file.split("/").includes("node_modules"))) return;
 
       if (fromSourceDir) {
         registry.invalidate();

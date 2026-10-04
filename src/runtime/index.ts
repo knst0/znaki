@@ -1,8 +1,11 @@
-import { staticNames } from "virtual:znaki/sprite";
+import type * as Registry from "virtual:znaki/registry";
+import { spriteUrl, staticNames } from "virtual:znaki/sprite";
 import type { IconData, IconName } from "znaki";
-import { shardKey } from "znaki";
+import { shardKey, symbolId } from "znaki";
 
-let registryPromise: Promise<typeof import("virtual:znaki/registry")> | null = null;
+export { spriteUrl, symbolId };
+
+let registryPromise: Promise<typeof Registry> | null = null;
 const cache = new Map<IconName, Promise<IconData | null>>();
 
 export function isSpriteName(name: IconName): boolean {

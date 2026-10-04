@@ -19,13 +19,22 @@ export default defineConfig([
     },
   },
   {
+    entry: ["src/runtime/index.ts"],
+    outDir: "dist/runtime",
+    format: "esm",
+    platform: "neutral",
+    dts: true,
+    fixedExtension: false,
+    deps: { neverBundle: ["znaki", /^virtual:znaki/] },
+  },
+  {
     entry: ["src/solid/index.ts"],
     outDir: "dist/solid",
     format: "esm",
     platform: "neutral",
     dts: true,
     fixedExtension: false,
-    deps: { neverBundle: ["solid-js", "@solidjs/web", "znaki", /^virtual:znaki/] },
+    deps: { neverBundle: ["solid-js", "@solidjs/web", "znaki", "znaki/runtime", /^virtual:znaki/] },
     outputOptions: { entryFileNames: "[name].jsx" },
   },
   {
@@ -36,6 +45,6 @@ export default defineConfig([
     platform: "neutral",
     dts: true,
     fixedExtension: false,
-    deps: { neverBundle: ["react", "react/jsx-runtime", "znaki", /^virtual:znaki/] },
+    deps: { neverBundle: ["react", "react/jsx-runtime", "znaki", "znaki/runtime", /^virtual:znaki/] },
   },
 ]);

@@ -41,6 +41,7 @@ export default defineConfig({
         plugins: [solid()],
         resolve: {
           alias: {
+            "znaki/runtime": resolve(root, "src/runtime/index.ts"),
             znaki: resolve(root, "src/index.ts"),
             "virtual:znaki/sprite": virtualStubs,
             "virtual:znaki/registry": virtualStubs,
@@ -56,6 +57,7 @@ export default defineConfig({
         plugins: [react({ jsxImportSource: "react" })],
         resolve: {
           alias: {
+            "znaki/runtime": resolve(root, "src/runtime/index.ts"),
             znaki: resolve(root, "src/index.ts"),
             "virtual:znaki/sprite": virtualStubs,
             "virtual:znaki/registry": virtualStubs,
@@ -66,6 +68,21 @@ export default defineConfig({
           environment: "happy-dom",
           setupFiles: ["test/helpers/react-env.ts"],
           include: ["test/react/*.test.tsx"],
+        },
+      },
+      {
+        resolve: {
+          alias: {
+            "znaki/runtime": resolve(root, "src/runtime/index.ts"),
+            znaki: resolve(root, "src/index.ts"),
+            "virtual:znaki/sprite": virtualStubs,
+            "virtual:znaki/registry": virtualStubs,
+          },
+        },
+        test: {
+          name: "runtime",
+          environment: "node",
+          include: ["test/runtime/*.test.ts"],
         },
       },
     ],

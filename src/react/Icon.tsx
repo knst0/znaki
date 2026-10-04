@@ -1,11 +1,8 @@
 /** @jsxImportSource react */
 import type { JSX, SVGProps } from "react";
 import { Suspense, use } from "react";
-import { spriteUrl } from "virtual:znaki/sprite";
 import type { IconData, IconName } from "znaki";
-import { symbolId } from "znaki";
-
-import { isSpriteName, loadIcon } from "./loader.ts";
+import { isSpriteName, loadIcon, spriteUrl, symbolId } from "znaki/runtime";
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "dangerouslySetInnerHTML"> {
   name: IconName;

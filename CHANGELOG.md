@@ -1,5 +1,16 @@
 # znaki
 
+## Unreleased
+
+### Minor Changes
+
+- Add a `framework` scanner contract for custom source formats, sharing sprite collection, lazy registry pruning and hot updates with JSX.
+- Add `znaki/runtime` with `spriteUrl`, `symbolId`, `isSpriteName` and promise-cached `loadIcon`; React and Solid now use the same framework-neutral loader.
+
+### Patch Changes
+
+- Avoid building extra sprite-name sets during transforms before a sprite asset has been emitted, and avoid temporary arrays when filtering scan candidates.
+
 ## 0.4.0
 
 ### Minor Changes
