@@ -32,7 +32,12 @@ export function tabler(options: TablerOptions = {}): IconSource {
     load: (name: string): IconData | null => {
       const path = resolve(dir, `${name}.svg`);
       if (!path.startsWith(dir) || !existsSync(path)) return null;
-      return parseSvg(readFileSync(path, "utf-8"));
+      try {
+        return parseSvg(readFileSync(path, "utf-8"));
+      } catch (error) {
+        const detail = error instanceof Error ? error.message.replace(/^znaki:\s*/, "") : String(error);
+        throw new Error(`znaki: ${path}: ${detail}`);
+      }
     },
   };
 }

@@ -29,11 +29,6 @@ describe("SourceRegistry.resolve", () => {
     expect(registry.resolve("x:home")).toBeNull();
   });
 
-  it("takes the first source that has the icon", () => {
-    const registry = new SourceRegistry([fakeSource("i", { home: data("0 0 1 1") }), fakeSource("i", { home: data("0 0 9 9") })]);
-    expect(registry.resolve("i:home")?.viewBox).toBe("0 0 1 1");
-  });
-
   it("falls through to a later source when the first misses", () => {
     const registry = new SourceRegistry([fakeSource("i", {}), fakeSource("i", { home: data("0 0 9 9") })]);
     expect(registry.resolve("i:home")?.viewBox).toBe("0 0 9 9");

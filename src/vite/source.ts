@@ -66,6 +66,19 @@ export class SourceRegistry {
     this.#names = [...all].sort();
     return this.#names;
   }
+
+  collisions(): Map<string, number[]> {
+    const owners = new Map<string, number[]>();
+    this.#sources.forEach((source, index) => {
+      for (const name of source.list()) {
+        const full = source.prefix ? `${source.prefix}:${name}` : name;
+        const existing = owners.get(full);
+        if (existing) existing.push(index);
+        else owners.set(full, [index]);
+      }
+    });
+    return new Map([...owners].filter(([, indexes]) => indexes.length > 1));
+  }
 }
 
 function strip(fullName: string, prefix: string): string | null {

@@ -1,15 +1,18 @@
+import { act, useState } from "react";
 import { describe, expect, it } from "vitest";
+import { Icon, PreloadSprite } from "znaki";
+import type { IconName } from "znaki";
 
-import { Icon } from "../../src/react/Icon.tsx";
-import { PreloadSprite } from "../../src/react/PreloadSprite.tsx";
 import { lazyIcon, spriteUrl } from "../fixtures/virtual.ts";
 import { mount, svg } from "../helpers/render-react.tsx";
+
+const Lazy = (props: { name: IconName; fill?: string }) => <Icon {...props} />;
 
 describe("Icon: sprite mode", () => {
   it("references the sprite symbol through use", async () => {
     const host = await mount(<Icon name="i:sprited" />);
 
-    expect(svg(host).querySelector("use")?.getAttribute("href")).toBe(`${spriteUrl}#znaki-i-sprited`);
+    expect(svg(host).querySelector("use")?.getAttribute("href")).toBe(`${spriteUrl}#znaki-i_3a_sprited`);
   });
 
   it("does not set a viewBox of its own", async () => {
@@ -21,7 +24,7 @@ describe("Icon: sprite mode", () => {
 
 describe("Icon: lazy registry", () => {
   it("loads a non-sprite icon from the registry", async () => {
-    const host = await mount(<Icon name="i:lazy" />);
+    const host = await mount(<Lazy name="i:lazy" />);
 
     expect(svg(host).getAttribute("viewBox")).toBe(lazyIcon.viewBox);
     expect(svg(host).getAttribute("fill")).toBe("red");
@@ -29,10 +32,41 @@ describe("Icon: lazy registry", () => {
     expect(svg(host).querySelector("use")).toBeNull();
   });
 
-  it("falls back to the sprite reference for an unknown name", async () => {
-    const host = await mount(<Icon name="i:missing" />);
+  it("keeps local SVG definitions distinct between repeated lazy instances", async () => {
+    const host = await mount(
+      <>
+        <Lazy name="i:lazy" />
+        <Lazy name="i:lazy" />
+      </>,
+    );
+    const icons = [...host.querySelectorAll("svg")];
+    const ids = icons.map((icon) => icon.querySelector("linearGradient")!.id);
+    expect(new Set(ids).size).toBe(2);
+    for (let index = 0; index < icons.length; index++) {
+      expect(icons[index].querySelector("circle")?.getAttribute("fill")).toBe(`url(#${ids[index]})`);
+    }
+  });
+});
 
-    expect(svg(host).querySelector("use")?.getAttribute("href")).toBe(`${spriteUrl}#znaki-i-missing`);
+describe("compiled reactive props", () => {
+  it("updates name and dimensions while preserving explicit prop precedence", async () => {
+    function App() {
+      const [changed, setChanged] = useState(false);
+      return (
+        <>
+          <button onClick={() => setChanged(true)}>Change</button>
+          <Icon name={changed ? "i:alternate" : "i:sprited"} size={changed ? 32 : 16} width={48} aria-labelledby="label" />
+        </>
+      );
+    }
+    const host = await mount(<App />);
+    expect(svg(host).getAttribute("width")).toBe("48");
+    expect(svg(host).getAttribute("height")).toBe("16");
+    expect(svg(host).hasAttribute("aria-hidden")).toBe(false);
+    await act(async () => host.querySelector("button")!.click());
+    expect(svg(host).getAttribute("height")).toBe("32");
+    expect(svg(host).getAttribute("width")).toBe("48");
+    expect(svg(host).querySelector("use")?.getAttribute("href")).toBe(`${spriteUrl}#znaki-i_3a_alternate`);
   });
 });
 
@@ -72,7 +106,7 @@ describe("Icon: props", () => {
   });
 
   it("lets explicit props win over the icon data attrs", async () => {
-    const host = await mount(<Icon name="i:lazy" fill="currentColor" />);
+    const host = await mount(<Lazy name="i:lazy" fill="currentColor" />);
 
     expect(svg(host).getAttribute("fill")).toBe("currentColor");
   });

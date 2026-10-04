@@ -2,59 +2,46 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { ICONS } from "../fixtures/icons.ts";
 import { useProject } from "../fixtures/project.ts";
-import { memorySource } from "../fixtures/sources.ts";
+import { fakeSource, memorySource } from "../fixtures/sources.ts";
 import { buildProject } from "../helpers/build.ts";
-import type { ZnakiOptions } from "../helpers/build.ts";
 
 const project = useProject("znaki-options");
 
-const bundle = (options: ZnakiOptions) => buildProject({ root: project.root, options });
+describe("project scanning", () => {
+  it("collects declared usage from included directories but not output or excluded directories", async () => {
+    project.file("main.tsx", `export * from "virtual:znaki/sprite";`);
+    project.file(join("src", "a.tsx"), `import { Icon } from "znaki"; export const A = () => <Icon name="i:home"/>;`);
+    project.file(join("vendor", "b.tsx"), `import { Icon } from "znaki"; export const B = () => <Icon name="i:user"/>;`);
+    project.file(join("dist", "old.tsx"), `import { Icon } from "znaki"; export const B = () => <Icon name="i:user"/>;`);
+    const { sprite } = await buildProject({ root: project.root, options: { sources: [memorySource()], exclude: ["vendor"], dts: false } });
+    expect(sprite).toContain('id="znaki-i_3a_home"');
+    expect(sprite).not.toContain('id="znaki-i_3a_user"');
+  });
 
-describe("warnings", () => {
-  it("warns about icons missing from every source", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="i:nope" />;`);
+  it("limits initial discovery to explicitly included directories", async () => {
+    project.file("main.tsx", `export * from "virtual:znaki/sprite";`);
+    project.file(join("src", "a.tsx"), `import { Icon } from "znaki"; export const A = () => <Icon name="i:home"/>;`);
+    project.file(join("other", "b.tsx"), `import { Icon } from "znaki"; export const B = () => <Icon name="i:user"/>;`);
+    const { sprite } = await buildProject({ root: project.root, options: { sources: [memorySource()], include: ["src"], dts: false } });
+    expect(sprite).toContain('id="znaki-i_3a_home"');
+    expect(sprite).not.toContain('id="znaki-i_3a_user"');
+  });
 
-    const { warnings } = await bundle({ sources: [memorySource()], dts: false });
-
-    expect(warnings.join("\n")).toContain(`icon "i:nope" not found`);
+  it("rejects an unresolved static name in a production build", async () => {
+    project.file("main.tsx", `import { Icon } from "znaki"; export const C = () => <Icon name="i:nope"/>;`);
+    await expect(buildProject({ root: project.root, options: { sources: [memorySource()], dts: false } })).rejects.toThrow(/i:nope/);
   });
 });
 
-describe("project scanning", () => {
-  it("collects icons from files that are never imported", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";`);
-    project.file("unused.tsx", `export const C = () => <Icon name="i:user" />;`);
-
-    const { sprite } = await bundle({ sources: [memorySource()], dts: false });
-    expect(sprite).toContain("znaki-i-user");
-  });
-
-  it("limits scanning to the include directories", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";`);
-    project.file(join("src", "a.tsx"), `export const A = () => <Icon name="i:home" />;`);
-    project.file(join("other", "b.tsx"), `export const B = () => <Icon name="i:user" />;`);
-
-    const { sprite } = await bundle({ sources: [memorySource()], include: ["src"], dts: false });
-
-    expect(sprite).toContain("znaki-i-home");
-    expect(sprite).not.toContain("znaki-i-user");
-  });
-
-  it("skips build output and excluded directories", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";`);
-    project.file(join("dist", "old.tsx"), `export const A = () => <Icon name="i:home" />;`);
-    project.file(join("vendor", "b.tsx"), `export const B = () => <Icon name="i:user" />;`);
-
-    const { sprite } = await bundle({ sources: [memorySource()], exclude: ["vendor"], dts: false });
-
-    expect(sprite).not.toContain("znaki-i-home");
-    expect(sprite).not.toContain("znaki-i-user");
-  });
-
-  it("ignores a missing include directory", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";`);
-
-    await expect(bundle({ sources: [memorySource()], include: ["nope"], dts: false })).resolves.toBeDefined();
+describe("source precedence", () => {
+  it("rejects ambiguous names unless first-source overrides are explicitly allowed", async () => {
+    project.file("main.tsx", `import { Icon } from "znaki"; export const C = () => <Icon name="i:home"/>;`);
+    const options = { sources: [memorySource(), fakeSource("i", { home: ICONS.user })], dts: false as const };
+    await expect(buildProject({ root: project.root, options })).rejects.toThrow(/collision.*i:home/);
+    const { sprite } = await buildProject({ root: project.root, options: { ...options, allowOverrides: true } });
+    expect(sprite).toContain('d="M1 1"');
+    expect(sprite).not.toContain("<circle");
   });
 });

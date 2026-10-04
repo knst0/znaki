@@ -1,194 +1,91 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { Window } from "happy-dom";
 import { describe, expect, it } from "vitest";
 
+import { ICONS } from "../fixtures/icons.ts";
 import { useProject } from "../fixtures/project.ts";
-import { memorySource } from "../fixtures/sources.ts";
+import { fakeSource, memorySource } from "../fixtures/sources.ts";
 import { buildProject } from "../helpers/build.ts";
 import type { ZnakiOptions } from "../helpers/build.ts";
 
 const project = useProject("znaki-build");
-
-const EMPTY_SPRITE = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"></svg>`;
-
 const bundle = (options: ZnakiOptions, entry?: string) => buildProject({ root: project.root, options, entry });
+const symbols = (markup: string) => {
+  const window = new Window();
+  return new window.DOMParser().parseFromString(markup, "image/svg+xml").querySelectorAll("symbol");
+};
 
-describe("virtual:znaki/sprite", () => {
-  it("emits a sprite asset with a symbol per used icon", async () => {
+describe("production manifest", () => {
+  it("collects imported intrinsic aliases, not unrelated components or string literals", async () => {
     project.file(
       "main.tsx",
-      `import { spriteUrl } from "virtual:znaki/sprite";\nexport const C = () => <Icon name="i:home" />;\nexport { spriteUrl };`,
+      `import { Icon as Glyph } from "znaki";
+      const Icon = () => null;
+      export const label = "i:user";
+      export const C = () => <><Glyph name="i:home"/><Icon name="i:user"/></>;`,
     );
-
     const { sprite } = await bundle({ sources: [memorySource()], dts: false });
-
-    expect(sprite).toBe(
-      `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><symbol id="znaki-i-home" viewBox="0 0 16 16" fill="none"><path d="M1 1"/></symbol></svg>`,
-    );
+    const found = symbols(sprite);
+    expect(found).toHaveLength(1);
+    expect(found[0].getAttribute("viewBox")).toBe("0 0 16 16");
+    expect(found[0].querySelector("path")?.getAttribute("d")).toBe("M1 1");
   });
 
-  it("exposes the emitted sprite url and the static name set", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";\nexport const C = () => <Icon name="i:home" />;`);
-
-    const { chunk } = await bundle({ sources: [memorySource()], dts: false });
-
-    expect(chunk).toContain('new Set(["i:home"])');
-    expect(chunk).toMatch(/znaki-sprite[-\w]*\.svg/);
+  it("finalizes the sprite after imported files outside initial scan directories", async () => {
+    project.file("main.tsx", `export { C } from "./outside/view.tsx"; export * from "virtual:znaki/sprite";`);
+    project.file("outside/view.tsx", `import { Icon } from "znaki"; export const C = () => <Icon name="i:user"/>;`);
+    const { sprite } = await bundle({ sources: [memorySource()], include: ["empty"], dts: false });
+    const found = symbols(sprite);
+    expect(found).toHaveLength(1);
+    expect(found[0].querySelector("circle")).not.toBeNull();
   });
 
-  it("only includes icons that are actually used", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";\nexport const C = () => <Icon name="i:user" />;`);
+  it("uses explicit exact names and wildcard patterns, without literal harvesting", async () => {
+    project.file("main.tsx", `export * from "virtual:znaki/sprite"; export const unrelated = "i:user";`);
+    const source = fakeSource("i", { ...ICONS, "home-extra": ICONS.user, "arrow-left": ICONS.quoted });
+    const { sprite } = await bundle({ sources: [source], includeIcons: ["i:home", "i:arrow-*"], dts: false });
+    const found = symbols(sprite);
+    expect(found).toHaveLength(2);
+    expect(found[0].parentElement?.querySelector("circle")).toBeNull();
+    expect([...found].map((node) => node.getAttribute("viewBox") ?? "").sort()).toEqual(["0 0 16 16", "0 0 2 2"]);
+  });
 
+  it("escapes source attributes without changing their decoded value", async () => {
+    project.file("main.tsx", `import { Icon } from "znaki"; export const C = () => <Icon name="i:quoted"/>;`);
     const { sprite } = await bundle({ sources: [memorySource()], dts: false });
-
-    expect(sprite).toContain("znaki-i-user");
-    expect(sprite).not.toContain("znaki-i-home");
+    expect(symbols(sprite)[0].getAttribute("title")).toBe('a "b" & <c>');
   });
 
-  it("escapes attribute values in the sprite markup", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";\nexport const C = () => <Icon name="i:quoted" />;`);
-
-    const { sprite } = await bundle({ sources: [memorySource()], dts: false });
-    expect(sprite).toContain(`title="a &quot;b&quot; &amp; &lt;c>"`);
-  });
-
-  it("emits an empty sprite when nothing is used", async () => {
+  it("emits a valid empty sprite when only the URL is requested", async () => {
     project.file("main.tsx", `export * from "virtual:znaki/sprite";`);
-
-    expect((await bundle({ sources: [memorySource()], dts: false })).sprite).toBe(EMPTY_SPRITE);
-  });
-
-  it("leaves the source code untransformed", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="i:home" />;`);
-
-    expect((await bundle({ sources: [memorySource()], dts: false })).chunk).not.toContain("M1 1");
-  });
-
-  it("collects icons from a custom component name", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";\nexport const C = () => <MyIcon name="i:home" />;`);
-
-    const { sprite } = await bundle({ sources: [memorySource()], component: "MyIcon", dts: false });
-    expect(sprite).toContain("znaki-i-home");
-  });
-
-  it("ignores the default component name when a custom one is configured", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";\nexport const C = () => <Icon name="i:home" />;`);
-
-    const { sprite } = await bundle({ sources: [memorySource()], component: "MyIcon", dts: false });
-    expect(sprite).toBe(EMPTY_SPRITE);
+    expect(symbols((await bundle({ sources: [memorySource()], dts: false })).sprite)).toHaveLength(0);
   });
 });
 
-describe("virtual:znaki/registry", () => {
-  it("is empty when every usage is static", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/registry";\nexport const C = () => <Icon name="i:home" />;`);
-
-    const { chunk } = await bundle({ sources: [memorySource()], dts: false });
-    expect(chunk).toMatch(/shards\s*=\s*\{\s*\}/);
-  });
-
-  it("stays empty for a dynamic usage without runtime-built names", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/registry";\nexport const C = (p) => <Icon name={p.name} />;`);
-
-    const { chunk } = await bundle({ sources: [memorySource()], dts: false });
-    expect(chunk).toMatch(/shards\s*=\s*\{\s*\}/);
-  });
-
-  it("lists a shard per icon group reachable through a template literal", async () => {
-    project.file("main.tsx", 'export * from "virtual:znaki/registry";\nexport const C = (p) => <Icon name={`i:${p.name}`} />;');
-
-    const { chunk } = await bundle({ sources: [memorySource()], dts: false });
-
-    expect(chunk).toContain('"i-ho"');
-    expect(chunk).toContain('"i-us"');
-  });
-
-  it("limits the shards to the dynamic allowlist", async () => {
-    project.file("main.tsx", `export * from "virtual:znaki/registry";\nexport const C = (p) => <Icon name={p.name} />;`);
-
-    const { chunk } = await bundle({ sources: [memorySource()], dynamic: ["i:home"], dts: false });
-
-    expect(chunk).toContain('"i-ho"');
-    expect(chunk).not.toContain('"i-us"');
+describe("lazy delivery", () => {
+  it("includes explicitly lazy icons even without a dynamic component and excludes sprite icons", async () => {
+    project.file("main.tsx", `export * from "virtual:znaki/registry"; export * from "virtual:znaki/sprite";`);
+    const { output, sprite } = await bundle({ sources: [memorySource()], includeIcons: ["i:home"], lazyIcons: ["i:*"], dts: false });
+    const chunks = output.filter((item) => item.type === "chunk" && item.isDynamicEntry);
+    const entries: Record<string, unknown> = {};
+    for (const chunk of chunks) {
+      if (chunk.type !== "chunk") continue;
+      const loaded = await import(`data:text/javascript;base64,${Buffer.from(chunk.code).toString("base64")}`);
+      Object.assign(entries, loaded.default);
+    }
+    expect(Object.keys(entries).sort()).toEqual(["i:quoted", "i:user"]);
+    expect(symbols(sprite)).toHaveLength(1);
   });
 });
 
-describe("dynamic usage", () => {
-  it("adds icon name literals from any file to the sprite", async () => {
-    project.file("Button.tsx", `export const Button = (p) => <Icon name={p.icon} />;`);
-    project.file("main.tsx", `export * from "virtual:znaki/sprite";\nexport const C = () => <Button icon="i:user" label="i:nope" />;`);
-
-    const { sprite, chunk } = await bundle({ sources: [memorySource()], dts: false });
-
-    expect(sprite).toContain("znaki-i-user");
-    expect(sprite).not.toContain("znaki-i-home");
-    expect(chunk).toContain('new Set(["i:user"])');
-  });
-
-  it("ignores icon name literals while every usage is static", async () => {
-    project.file(
-      "main.tsx",
-      `export * from "virtual:znaki/sprite";\nexport const label = "i:user";\nexport const C = () => <Icon name="i:home" />;`,
-    );
-
-    const { sprite } = await bundle({ sources: [memorySource()], dts: false });
-    expect(sprite).not.toContain("znaki-i-user");
-  });
-
-  it("keeps sprite icons out of the registry", async () => {
-    project.file(
-      "main.tsx",
-      'export * from "virtual:znaki/registry";\nexport const home = "i:home";\nexport const C = (p) => <Icon name={`i:${p.name}`} />;',
-    );
-
-    const { chunk } = await bundle({ sources: [memorySource()], dts: false });
-
-    expect(chunk).not.toContain('"i-ho"');
-    expect(chunk).toContain('"i-us"');
-  });
-
-  it("does not warn about dynamic usage", async () => {
-    project.file("main.tsx", `export const C = (p) => <Icon name={p.name} />;`);
-
-    const { warnings } = await bundle({ sources: [memorySource()], dts: false });
-    expect(warnings.join("\n")).not.toContain("dynamic");
-  });
-});
-
-describe("virtual:znaki/icon/*", () => {
-  it("serves icon data for a direct import", async () => {
-    project.file("main.tsx", `export { default } from "virtual:znaki/icon/i%3Ahome";`);
-
-    const { chunk } = await bundle({ sources: [memorySource()], dts: false });
-    expect(chunk).toContain(`"viewBox": "0 0 16 16"`);
-  });
-});
-
-describe("dts generation", () => {
-  it("writes znaki.d.ts by default with every available name", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="i:home" />;`);
-
-    await bundle({ sources: [memorySource()] });
-
-    const content = readFileSync(join(project.root, "znaki.d.ts"), "utf-8");
-    expect(content).toContain('"i:home"');
-    expect(content).toContain('"i:user"');
-  });
-
-  it("honours a custom dts path relative to the root", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="i:home" />;`);
-
+describe("declaration output", () => {
+  it("writes names to a custom path and leaves declarations alone when disabled", async () => {
+    project.file("main.tsx", `export const value = 1;`);
     await bundle({ sources: [memorySource()], dts: "types/icons.d.ts" });
-
-    expect(readFileSync(join(project.root, "types", "icons.d.ts"), "utf-8")).toContain('"i:home"');
-  });
-
-  it("writes nothing when dts is false", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="i:home" />;`);
-
+    expect(readFileSync(join(project.root, "types/icons.d.ts"), "utf8")).toContain('"i:home"');
     await bundle({ sources: [memorySource()], dts: false });
-
-    expect(readdirSync(project.root)).not.toContain("znaki.d.ts");
+    expect(existsSync(join(project.root, "znaki.d.ts"))).toBe(false);
   });
 });

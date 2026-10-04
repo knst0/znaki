@@ -1,50 +1,32 @@
 import { describe, expect, it } from "vitest";
 
 import { symbolId } from "../../src/id.ts";
-import {
-  ICON_PREFIX,
-  ICON_PREFIX_RESOLVED,
-  iconId,
-  iconName,
-  REGISTRY_ID,
-  REGISTRY_RESOLVED,
-  SPRITE_ID,
-  SPRITE_RESOLVED,
-} from "../../src/vite/ids.ts";
 
 describe("symbolId", () => {
   it.each([
     ["home", "znaki-home"],
-    ["arrow-right_2", "znaki-arrow-right_2"],
-    ["tabler:arrow/right", "znaki-tabler-arrow-right"],
-    ["a b.c", "znaki-a-b-c"],
-    ["ёлка", "znaki-----"],
+    ["i:home", "znaki-i_3a_home"],
+    ["arrow-right_2", "znaki-arrow_2d_right_5f_2"],
+    ["tabler:arrow/right", "znaki-tabler_3a_arrow_2f_right"],
+    ["a b.c", "znaki-a_20_b_2e_c"],
     ["", "znaki-"],
   ])("maps %j to %j", (name, expected) => {
     expect(symbolId(name)).toBe(expected);
   });
-});
 
-describe("virtual ids", () => {
-  it("exposes the public specifiers", () => {
-    expect(SPRITE_ID).toBe("virtual:znaki/sprite");
-    expect(REGISTRY_ID).toBe("virtual:znaki/registry");
-    expect(ICON_PREFIX).toBe("virtual:znaki/icon/");
+  it("keeps collision-prone names distinct", () => {
+    // Old dash-folding mapped each pair to the same id; sprite <use> hrefs
+    // would then resolve to the wrong icon.
+    expect(symbolId("local:brand/x")).toBe("znaki-local_3a_brand_2f_x");
+    expect(symbolId("local:brand-x")).toBe("znaki-local_3a_brand_2d_x");
+    expect(symbolId("local:brand/x")).not.toBe(symbolId("local:brand-x"));
+    expect(symbolId("a-b")).not.toBe(symbolId("a/b"));
+    expect(symbolId("a_b")).not.toBe(symbolId("a b"));
   });
 
-  it("prefixes resolved ids with a null byte", () => {
-    expect(SPRITE_RESOLVED).toBe("\0virtual:znaki/sprite");
-    expect(REGISTRY_RESOLVED).toBe("\0virtual:znaki/registry");
-    expect(ICON_PREFIX_RESOLVED).toBe("\0virtual:znaki/icon/");
-  });
-
-  it("encodes icon names into ids", () => {
-    expect(iconId("home")).toBe("virtual:znaki/icon/home");
-    expect(iconId("tabler:arrow-right")).toBe("virtual:znaki/icon/tabler%3Aarrow-right");
-    expect(iconId("nested/icon name")).toBe("virtual:znaki/icon/nested%2Ficon%20name");
-  });
-
-  it.each(["home", "tabler:arrow-right", "nested/icon name", "a+b&c"])("round-trips %j", (name) => {
-    expect(iconName(`\0${iconId(name)}`)).toBe(name);
+  it("emits ASCII-only ids for non-ASCII names", () => {
+    expect(symbolId("ёлка")).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(symbolId("ёлка")).not.toBe(symbolId("елка"));
+    expect(symbolId("icon🎉")).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 });

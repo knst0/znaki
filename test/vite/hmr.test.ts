@@ -6,13 +6,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { local } from "../../src/vite/sources/local.ts";
 import { SVG } from "../fixtures/icons.ts";
 import { useProject } from "../fixtures/project.ts";
-import { createHotHarness, resolveId } from "../helpers/hot.ts";
+import { createHotHarness } from "../helpers/hot.ts";
 import type { HotHarness, HotParams } from "../helpers/hot.ts";
 
 const project = useProject("znaki-hot");
-
 let iconDir: string;
-
 beforeEach(() => {
   iconDir = join(project.root, "icons");
   mkdirSync(iconDir, { recursive: true });
@@ -26,138 +24,56 @@ async function harness(options: HotParams["options"] = {}): Promise<HotHarness> 
   return h;
 }
 
-describe("hotUpdate: source files", () => {
-  it("invalidates the sprite module when a file gains an icon", async () => {
+async function spriteNames(h: HotHarness): Promise<string[]> {
+  const code = h.load("\0virtual:znaki/sprite")!;
+  // The virtual module content is selected by the current HMR state.
+  const module = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+  return [...module.staticNames];
+}
+
+describe("hot update transitions", () => {
+  it("adds and removes usage and keeps an unchanged usage stable", async () => {
     project.file("main.tsx", `export const C = () => <div />;`);
     const h = await harness();
-
-    await h.hotUpdate(join(project.root, "main.tsx"), `export const C = () => <Icon name="local:home" />;`);
-
+    await h.hotUpdate(join(project.root, "main.tsx"), `import { Icon } from "znaki"; export const C = () => <Icon name="local:home"/>;`);
+    expect(await spriteNames(h)).toEqual(["local:home"]);
     expect(h.invalidated).toContain("\0virtual:znaki/sprite");
-    expect(h.load("\0virtual:znaki/sprite")).toContain('"local:home"');
-  });
-
-  it("does not invalidate when the icon set is unchanged", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="local:home" />;`);
-    const h = await harness();
-
-    await h.hotUpdate(join(project.root, "main.tsx"), `export const C = () => <Icon name="local:home" class="x" />;`);
-
+    h.invalidated.length = 0;
+    await h.hotUpdate(
+      join(project.root, "main.tsx"),
+      `import { Icon } from "znaki"; export const C = () => <Icon name="local:home" className="changed"/>;`,
+    );
     expect(h.invalidated).toEqual([]);
+    await h.hotUpdate(join(project.root, "main.tsx"), `export const C = () => <div/>;`);
+    expect(await spriteNames(h)).toEqual([]);
   });
 
-  it("invalidates the registry only when dynamic usage appears", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="local:home" />;`);
-    const h = await harness();
-
-    await h.hotUpdate(join(project.root, "main.tsx"), "export const C = (p) => <Icon name={`local:${p.n}`} />;");
-
-    expect(h.invalidated).toContain("\0virtual:znaki/registry");
-    expect(h.load("\0virtual:znaki/registry")).toContain('"local-ho"');
-  });
-
-  it("adds icon literals from a file without the component once usage is dynamic", async () => {
-    project.file("Button.tsx", `export const Button = (p) => <Icon name={p.icon} />;`);
-    project.file("main.tsx", `export const C = () => <div />;`);
-    const h = await harness();
-
-    await h.hotUpdate(join(project.root, "main.tsx"), `export const C = () => <Button icon="local:home" />;`);
-
-    expect(h.invalidated).toContain("\0virtual:znaki/sprite");
-    expect(h.load("\0virtual:znaki/sprite")).toContain('"local:home"');
-  });
-
-  it("removes icons when a file stops using the component", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="local:home" />;`);
-    const h = await harness();
-
-    await h.hotUpdate(join(project.root, "main.tsx"), `export const C = () => <div />;`);
-
-    expect(h.load("\0virtual:znaki/sprite")).toContain("new Set([])");
-  });
-
-  it("ignores files that are not source files or live in node_modules", async () => {
-    const h = await harness();
-
-    expect(await h.hotUpdate(join(project.root, "styles.css"), "body{}")).toBeUndefined();
-    expect(await h.hotUpdate(join(project.root, "node_modules", "a.tsx"), `<Icon name="local:home" />`)).toBeUndefined();
-  });
-});
-
-describe("hotUpdate: icon directories", () => {
-  it("picks up an icon added to a watched source dir", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="local:added" />;`);
-    const h = await harness();
-
-    expect(h.load("\0virtual:znaki/sprite")).toContain("new Set([])");
-    expect(h.warnings.join("\n")).toContain(`icon "local:added" not found`);
-
+  it("refreshes types and explicit wildcard inclusion when a source icon is added or removed", async () => {
+    const h = await harness({ includeIcons: ["local:*"], dts: "znaki.d.ts" });
     writeFileSync(join(iconDir, "added.svg"), SVG);
     await h.hotUpdate(join(iconDir, "added.svg"), SVG);
+    expect(await spriteNames(h)).toEqual(["local:added", "local:home"]);
+    expect(readFileSync(join(project.root, "znaki.d.ts"), "utf8")).toContain('"local:added"');
+    rmSync(join(iconDir, "added.svg"));
+    await h.hotUpdate(join(iconDir, "added.svg"), "");
+    expect(await spriteNames(h)).toEqual(["local:home"]);
+    expect(readFileSync(join(project.root, "znaki.d.ts"), "utf8")).not.toContain('"local:added"');
+  });
 
+  it("invalidates sprite content even when source names are unchanged", async () => {
+    project.file("main.tsx", `import { Icon } from "znaki"; export const C = () => <Icon name="local:home"/>;`);
+    const h = await harness();
+    writeFileSync(join(iconDir, "home.svg"), `<svg viewBox="0 0 32 32"><circle r="2"/></svg>`);
+    await h.hotUpdate(join(iconDir, "home.svg"), "");
     expect(h.invalidated).toContain("\0virtual:znaki/sprite");
   });
 
-  it("rewrites the dts when the icon dir changes", async () => {
-    project.file("main.tsx", `export const C = () => <div />;`);
-    const dts = join(project.root, "znaki.d.ts");
-    const h = await harness({ dts: "znaki.d.ts" });
-
-    expect(readFileSync(dts, "utf-8")).not.toContain("added");
-
-    writeFileSync(join(iconDir, "added.svg"), SVG);
-    await h.hotUpdate(join(iconDir, "added.svg"), SVG);
-
-    expect(readFileSync(dts, "utf-8")).toContain('"local:added"');
-  });
-
-  it("always invalidates the sprite for a source dir change", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="local:home" />;`);
+  it("resets deleted usage between builds", async () => {
+    project.file("main.tsx", `import { Icon } from "znaki"; export const C = () => <Icon name="local:home"/>;`);
     const h = await harness();
-
-    await h.hotUpdate(join(iconDir, "home.svg"), SVG);
-
-    expect(h.invalidated).toEqual(["\0virtual:znaki/sprite"]);
-  });
-});
-
-describe("buildStart", () => {
-  it("resets state between builds", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="local:home" />;`);
-    const h = await harness();
-
-    expect(h.load("\0virtual:znaki/sprite")).toContain('"local:home"');
-
+    expect(await spriteNames(h)).toEqual(["local:home"]);
     rmSync(join(project.root, "main.tsx"));
     await h.buildStart();
-
-    expect(h.load("\0virtual:znaki/sprite")).toContain("new Set([])");
-  });
-
-  it("warns once per unresolved icon name", async () => {
-    project.file("main.tsx", `export const C = () => <Icon name="local:nope" />;`);
-    const h = await harness();
-
-    expect(h.warnings.filter((message) => message.includes("local:nope"))).toHaveLength(1);
-  });
-});
-
-describe("resolveId", () => {
-  it("resolves the sprite, registry and icon ids", () => {
-    expect(resolveId("virtual:znaki/sprite")).toBe("\0virtual:znaki/sprite");
-    expect(resolveId("virtual:znaki/registry")).toBe("\0virtual:znaki/registry");
-    expect(resolveId("virtual:znaki/icon/home")).toBe("\0virtual:znaki/icon/home");
-  });
-
-  it("ignores unrelated ids", () => {
-    expect(resolveId("./main.tsx")).toBeNull();
-    expect(resolveId("virtual:other")).toBeNull();
-  });
-
-  it("returns null from load for unknown ids", async () => {
-    const h = await harness();
-
-    expect(h.load("\0virtual:znaki/icon/local%3Anope")).toBeNull();
-    expect(h.load("./main.tsx")).toBeNull();
+    expect(await spriteNames(h)).toEqual([]);
   });
 });

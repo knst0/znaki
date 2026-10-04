@@ -1,5 +1,6 @@
 import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { resolve } from "node:path";
 
 import znaki from "../../src/vite/index.ts";
 import type { ZnakiOptions } from "../../src/vite/index.ts";
@@ -26,7 +27,13 @@ export async function createDevHarness({ root, sources, options = {}, base }: De
     root,
     ...(base ? { base } : {}),
     logLevel: "silent",
-    oxc: { jsx: "preserve" },
+    resolve: {
+      alias: {
+        "znaki/runtime": resolve(import.meta.dirname, "../../src/runtime/index.ts"),
+        znaki: resolve(import.meta.dirname, "../../src/index.ts"),
+      },
+    },
+    oxc: { jsx: { runtime: "classic" } },
     server: { middlewareMode: true, watch: null },
     plugins: [znaki({ sources, dts: false, ...options })],
   });

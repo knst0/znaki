@@ -4,6 +4,8 @@ import solid from "@solidjs/vite-plugin";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
+import { compilerPlugin } from "./test/helpers/compiler.ts";
+
 const root = import.meta.dirname;
 const virtualStubs = resolve(root, "test/fixtures/virtual.ts");
 
@@ -38,7 +40,7 @@ export default defineConfig({
         },
       },
       {
-        plugins: [solid()],
+        plugins: [compilerPlugin("solid"), solid()],
         resolve: {
           alias: {
             "znaki/runtime": resolve(root, "src/runtime/index.ts"),
@@ -54,7 +56,7 @@ export default defineConfig({
         },
       },
       {
-        plugins: [react({ jsxImportSource: "react" })],
+        plugins: [compilerPlugin("react"), react({ jsxImportSource: "react" })],
         resolve: {
           alias: {
             "znaki/runtime": resolve(root, "src/runtime/index.ts"),

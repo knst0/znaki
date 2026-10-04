@@ -15,10 +15,3 @@ declare module "virtual:znaki/shard/*" {
   const icons: Record<string, IconData>;
   export default icons;
 }
-
-declare module "virtual:znaki/icon/*" {
-  import type { IconData } from "znaki";
-
-  const data: IconData;
-  export default data;
-}

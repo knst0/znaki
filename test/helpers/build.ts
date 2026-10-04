@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import znaki from "../../src/vite/index.ts";
 import type { Rollup } from "./vite.ts";
 import { build } from "./vite.ts";
@@ -36,6 +38,12 @@ export async function buildProject({ root, options, entry = "main.tsx" }: BuildP
   const result = (await build({
     root,
     logLevel: "silent",
+    resolve: {
+      alias: {
+        "znaki/runtime": resolve(import.meta.dirname, "../../src/runtime/index.ts"),
+        znaki: resolve(import.meta.dirname, "../../src/index.ts"),
+      },
+    },
     oxc: { jsx: { runtime: "classic" } },
     customLogger: {
       info: () => {},
@@ -51,6 +59,7 @@ export async function buildProject({ root, options, entry = "main.tsx" }: BuildP
       write: false,
       minify: false,
       lib: { entry, formats: ["es"], fileName: "out" },
+      rollupOptions: { external: ["react", "react/jsx-runtime", "solid-js", "@solidjs/web", "reze-js"] },
     },
   })) as Rollup.RollupOutput | Rollup.RollupOutput[];
 

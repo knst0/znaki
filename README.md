@@ -1,32 +1,36 @@
 # znaki
 
-Typesafe SVG icons for Vite. Collects the icons you actually use at build time, ships them as
-an external sprite, and generates a union type of every available icon name.
+Typesafe SVG icons for Vite. Use Lucide, Tabler, your own SVG files, or a custom icon library with React, Solid or reze.
 
-## Install
+## Quick start
+
+Install znaki and an icon library:
 
 ```sh
-pnpm add -D znaki @tabler/icons
+pnpm add -D znaki lucide-static
 ```
 
-`solid-js`, `@solidjs/web`, `react` and `@tabler/icons` are optional peer dependencies — install
-only what you use.
-
-## Setup
+Add znaki **before your framework plugin** in `vite.config.ts`:
 
 ```ts
-import znaki, { local, tabler } from "znaki/vite";
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import znaki, { lucide } from "znaki/vite";
 
 export default defineConfig({
   plugins: [
     znaki({
-      sources: [tabler(), local({ dir: "src/icons" })],
+      target: "react",
+      sources: [lucide()],
     }),
+    react(),
   ],
 });
 ```
 
-Add the generated declaration file and the virtual module types to your `tsconfig.json`:
+For Solid or reze, set `target: "solid"` or `target: "reze"` and use your framework's Vite plugin instead of `react()`.
+
+Add `"znaki/client"` to your existing TypeScript `types` list and `"znaki.d.ts"` to `include`:
 
 ```json
 {
@@ -35,141 +39,229 @@ Add the generated declaration file and the virtual module types to your `tsconfi
 }
 ```
 
-## Usage
-
-Import the components from the entry point for your framework — `znaki/solid` or `znaki/react`.
-Both expose the same API.
+Start Vite once to generate `znaki.d.ts`, then use an icon:
 
 ```tsx
-import { Icon, PreloadSprite } from "znaki/solid";
+import { Icon } from "znaki";
 
-<PreloadSprite />;
-<Icon name="tabler:home" size={24} />;
-<Icon name="local:logo" class="brand" />;
+<Icon name="lucide:arrow-right" size={24} />;
 ```
+
+Icon names are autocompleted and checked by TypeScript. Run Vite or a build before typechecking a fresh checkout. Use one framework target per TypeScript project.
+
+## Size, color and accessibility
+
+`Icon` accepts your framework's SVG attributes, event handlers and refs.
 
 ```tsx
-import { Icon, PreloadSprite } from "znaki/react";
+import { Icon } from "znaki";
+
+// Inherits the surrounding text color; size defaults to 1em.
+<Icon name="lucide:heart" />;
+
+// Explicit width and height take precedence over size.
+<Icon name="lucide:arrow-right" size={24} width={32} />;
+
+// Give a meaningful standalone icon an accessible name.
+<Icon name="lucide:circle-alert" size={20} aria-label="Warning" />;
+
+// A button's text already describes this decorative icon.
+<button>
+  <Icon name="lucide:save" size={16} />
+  Save
+</button>;
+```
+
+Use `className` in React and `class` in Solid/reze. Lucide and Tabler follow `currentColor`; custom SVGs must use `currentColor` if they should inherit text color.
+
+Icons are hidden from assistive technology unless you supply `aria-label` or `aria-labelledby`. An explicit `aria-hidden` overrides this default.
+
+Use `Icon` directly in JSX. Import aliases are supported, but passing it as a component value, calling it as a function, and re-exporting it through a barrel are not. To make a reusable component, wrap `<Icon>` in your own component. Do not pass children or `innerHTML`/`dangerouslySetInnerHTML` to `Icon`.
+
+### Preload icons
+
+Optionally render `PreloadSprite` once near the top of your page to start loading the shared icon file earlier:
+
+```tsx
+import { PreloadSprite } from "znaki";
 
 <PreloadSprite />;
-<Icon name="tabler:home" size={24} />;
-<Icon name="local:logo" className="brand" />;
 ```
 
-Icon names are `<prefix>:<name>`. Pass `prefix: ""` to a source to use bare names.
+It takes no props or children.
 
-## Sources
+## Icon sources
 
-| Source                           | Names                         |
-| -------------------------------- | ----------------------------- |
-| `tabler({ variant: "outline" })` | `tabler:home`                 |
-| `local({ dir: "src/icons" })`    | `local:logo`, `local:brand/x` |
+Import sources from `znaki/vite` and add them to `sources`. You can combine several sources.
 
-Sources are resolved in order, so an earlier source wins on a name collision. A custom source is
-just an object implementing `IconSource`.
+### Lucide
 
-## Delivery
-
-Icons become `<symbol>`s in a single hashed `znaki-sprite.svg` asset, referenced with
-`<use href="/assets/znaki-sprite-<hash>.svg#znaki-tabler-home">`. One cacheable request for the
-whole set.
-
-Names that cannot be resolved statically — say a wrapper component that forwards
-`<Icon name={props.icon} />` — are still served from the sprite: once such a usage exists, every
-string literal in the scanned files that is a known icon name (`<Button icon="tabler:home" />`,
-`const ICON = "tabler:user"`) is added to the sprite as well.
-
-Only names built at runtime fall back to a lazily imported registry, at the cost of a dynamic
-import. A template literal with a static head (`` `tabler:arrow-${dir}` ``) makes every icon starting
-with that head reachable. Names from anywhere else (an API response, `"tabler:" + name`) need the
-`dynamic` option — an allowlist of names or name prefixes:
-
-```ts
-znaki({ sources: [tabler()], dynamic: ["tabler:arrow-", "tabler:home"] });
+```sh
+pnpm add -D lucide-static
 ```
 
-The registry is split into shards grouped by source prefix and the first two characters of the
-name, so one lookup pulls in a small chunk instead of a chunk per icon. Icons already in the
-sprite never end up in the registry.
-
-## Custom frameworks
-
-Use `znaki/runtime` to build a component without depending on React or Solid:
-
 ```ts
-import { isSpriteName, loadIcon, spriteUrl, symbolId } from "znaki/runtime";
+import { lucide } from "znaki/vite";
+
+lucide(); // lucide:arrow-right, lucide:heart, ...
+lucide({ prefix: "ui" }); // ui:arrow-right, ui:heart, ...
 ```
 
-- If `isSpriteName(name)` is true, render an SVG containing
-  `<use href={spriteUrl + "#" + symbolId(name)} />`. No asynchronous lookup is needed.
-- Otherwise, await `loadIcon(name)`. It returns `{ body, viewBox, attrs }`, or `null`
-  for a name outside the generated registry. Apply the SVG attributes and viewBox,
-  then insert the trusted source SVG body using your framework's raw SVG facility.
-  Never insert untrusted API text as SVG markup.
-- Handle `null`, rejected loads and stale asynchronous results in your component.
-  `loadIcon` returns the same promise for repeated calls with the same name, including
-  rejected promises. The cache is shared by components using the same runtime instance.
-- Set size and accessibility attributes in your component. For preload support, render
-  `<link rel="preload" href={spriteUrl} as="image" type="image/svg+xml">`.
+Names use kebab-case. You do not need `lucide-react` or another framework-specific Lucide package.
 
-The runtime requires the Vite plugin and `znaki/client` types. The root `znaki`
-entry remains independent of virtual modules and exports `IconName` and `IconData`.
-Sprite icons are excluded from the lazy registry: check `isSpriteName` before loading.
+### Tabler
 
-JSX-based custom components work with the existing `component` option. For other
-source formats, provide a synchronous `FrameworkIntegration`. For example, a
-declarative UI that stores icon usage in `.icons` JSON files can use:
+```sh
+pnpm add -D @tabler/icons
+```
 
 ```ts
-import znaki, { tabler } from "znaki/vite";
-import type { FrameworkIntegration, FrameworkScanResult } from "znaki/vite";
+import { tabler } from "znaki/vite";
 
-const framework: FrameworkIntegration = {
-  include: (id) => id.endsWith(".icons"),
-  scan: (code): FrameworkScanResult => JSON.parse(code),
+tabler(); // tabler:home, tabler:user, ...
+tabler({ variant: "filled", prefix: "filled" }); // filled:heart, ...
+```
+
+The default variant is `"outline"`.
+
+### Your SVG files
+
+```ts
+import { local } from "znaki/vite";
+
+local({ dir: "src/icons" });
+// src/icons/logo.svg       → local:logo
+// src/icons/brand/mark.svg → local:brand/mark
+
+local({ dir: "src/icons", prefix: "app" });
+// src/icons/logo.svg → app:logo
+```
+
+Directories are relative to your Vite root. File changes are picked up during development.
+
+Names normally have the form `<prefix>:<name>`. Set `prefix: ""` for bare names. If two sources provide the same full name, change their prefixes or set `allowOverrides: true` to prefer the first source.
+
+### Custom libraries and parsers
+
+Use `library()` when your icons come from JSON, path data, or another local format. Provide the available names, a loader, and a parser:
+
+```ts
+import znaki, { library } from "znaki/vite";
+
+const catalogue: Record<string, { width: number; height: number; path: string }> = {
+  home: { width: 24, height: 24, path: "M3 12 12 3 21 12v9H3Z" },
 };
 
-// page.icons:
-// { "names": ["tabler:home"], "dynamic": true,
-//   "literals": ["tabler:user"], "prefixes": ["tabler:arrow-"] }
+const custom = library({
+  prefix: "custom",
+  list: () => Object.keys(catalogue),
+  load: (name) => catalogue[name] ?? null,
+  parse: (icon) => ({
+    viewBox: `0 0 ${icon.width} ${icon.height}`,
+    attrs: { fill: "currentColor" },
+    body: `<path d="${icon.path}"/>`,
+  }),
+});
 
-znaki({ sources: [tabler()], framework });
+znaki({ sources: [custom] });
+// Use <Icon name="custom:home" /> in your application.
 ```
 
-For a template language, implement `scan(code, id, component)` using that language's
-parser. `id` is a normalized absolute file path; `component` is the configured tag name.
-Return `names` (statically resolved icon names), `dynamic` (whether unresolved icon
-usage exists), and optionally `literals` (candidate icon strings) and `prefixes`
-(runtime-built name prefixes). All name collections accept iterables.
+- `list()` returns local names, without the prefix.
+- `load(name)` returns the raw icon data, or `null` when unavailable.
+- `parse(value, name)` returns an SVG string, an object with `body`, `viewBox` and `attrs`, or `null` when unavailable.
+- Callbacks must be synchronous. Download remote catalogues before running Vite.
+- For a file-backed catalogue, add `dirs: ["icons"]` and an `init(root)` callback that reads it. `init` runs at startup and again when files in those directories change. Relative directories are resolved from the Vite root.
 
-Matching files use the custom scanner instead of the JSX scanner; unmatched JSX files
-keep the built-in behavior. Custom results participate in the same sprite pruning,
-dynamic allowlist, warnings and hot updates. Literal candidates only enter the sprite
-when dynamic usage exists somewhere in the scanned project. Prefixes and `dynamic`
-options only enable lazy delivery when such usage exists.
+Custom icons have the same name completion and loading options as built-in sources.
 
-The scanner runs on original source during directory collection, transforms and hot
-updates, so it must be deterministic and tolerate repeated calls. Parser errors fail
-the operation rather than silently dropping icons. Virtual modules and query-bearing
-submodules are not scanned. Existing directory exclusions still apply to initial
-collection. Put `znaki()` before your framework compiler in the Vite plugin list.
-This API supplies integration hooks, not a bundled Vue/Svelte/template parser.
+## Dynamic icon names
 
-## Options
+Literal names and simple conditionals work without extra configuration:
 
-| Option      | Default        | Description                                                |
-| ----------- | -------------- | ---------------------------------------------------------- |
-| `sources`   | —              | Icon sources, resolved in order                            |
-| `component` | `"Icon"`       | JSX tag name the scanner looks for                         |
-| `framework` | —              | Custom source filter and scanner; JSX remains the fallback |
-| `dynamic`   | `[]`           | Names or prefixes reachable through the registry           |
-| `dts`       | `"znaki.d.ts"` | Where to write the generated names, or `false`             |
-| `include`   | project root   | Directories to scan for icon usage                         |
-| `exclude`   | —              | Extra directories to skip while scanning                   |
+```tsx
+<Icon name="lucide:heart" />;
+<Icon name={expanded ? "lucide:chevron-up" : "lucide:chevron-down"} />;
+```
 
-Scanning always skips `node_modules`, dot directories, `build.outDir` and the usual output
-directories (`dist`, `build`, `coverage`, `storybook-static`).
+For names supplied through props, arrays, configuration or API responses, declare which icons your application can use:
+
+```ts
+znaki({
+  sources: [lucide()],
+  includeIcons: ["lucide:home", "lucide:arrow-*"],
+  lazyIcons: ["lucide:chart-*"],
+});
+```
+
+- **`includeIcons`** loads the matching icons together. Use it for navigation, common controls, and other icons you want available immediately.
+- **`lazyIcons`** loads matching icons on demand. Use it for larger sets that are not needed on every page.
+- An exact name matches only that icon. `*` matches any sequence of characters; `"lucide:*"` selects the whole Lucide catalogue.
+- Icons used by literal name are loaded with the shared icon file, even if they also match `lazyIcons`.
+
+Type dynamic values as `IconName`:
+
+```tsx
+import { Icon } from "znaki";
+import type { IconName } from "znaki";
+
+function MenuIcon(props: { name: IconName }) {
+  return <Icon name={props.name} size={20} />;
+}
+```
+
+TypeScript checks names, but does not configure loading: `includeIcons` or `lazyIcons` is still required for this wrapper. Validate names received from external data before using them.
+
+For server-rendered reze pages, use `includeIcons` rather than `lazyIcons`. The reze on-demand renderer is client-only.
+
+## Configuration reference
+
+| Option           | Default        | Purpose                                               |
+| ---------------- | -------------- | ----------------------------------------------------- |
+| `sources`        | required       | Icon libraries and local directories                  |
+| `target`         | `"react"`      | `"react"`, `"solid"` or `"reze"`                      |
+| `includeIcons`   | `[]`           | Names or `*` patterns to load together                |
+| `lazyIcons`      | `[]`           | Names or `*` patterns to load on demand               |
+| `allowOverrides` | `false`        | Prefer the first source when names overlap            |
+| `dts`            | `"znaki.d.ts"` | Generated type file path; `false` disables generation |
+| `include`        | project root   | Directories to search for icon usage at startup       |
+| `exclude`        | `[]`           | Additional directories to skip during that search     |
+| `framework`      | —              | A usage scanner for additional template formats       |
+
+For non-JSX templates, `framework` accepts `include(id)` and `scan(code, id)` callbacks. Return `{ names, dynamic }` from `scan`, where `names` contains full icon names and `dynamic` indicates names not known in advance. You still need your template integration to render the icons; registering a scanner does not add template rendering support.
+
+## Troubleshooting
+
+### TypeScript cannot find `Icon` or rejects a new icon name
+
+Start Vite or run a build to regenerate `znaki.d.ts`. Check that the file is included in your TypeScript project and that `target` matches your framework.
+
+### An icon cannot be found
+
+Check its source, prefix and spelling. For a dynamic name, check `includeIcons` and `lazyIcons` too. Unknown literal names and missing exact names in those options produce development warnings and fail production builds.
+
+### An SVG file is rejected
+
+Provide a valid `viewBox`, or positive numeric `width` and `height` (plain numbers or `px`). For example:
+
+```svg
+<svg viewBox="0 0 24 24" fill="currentColor">
+  <path d="M3 12 12 3 21 12v9H3Z" />
+</svg>
+```
+
+Use presentation attributes such as `fill` and `stroke` instead of `<style>` elements. Event handler attributes, scripts and other active elements, DTD/entity declarations, root-level paint references and SMIL syncbase references are unsupported. Use trusted project files or installed icon packages; znaki is not a sanitizer for user-uploaded SVGs.
+
+## Migrating from 0.x
+
+- Import `Icon` and `PreloadSprite` from `znaki` instead of `znaki/react` or `znaki/solid`.
+- Set `target` and place znaki before your framework plugin.
+- Regenerate `znaki.d.ts` and include it in your TypeScript project.
+- Replace `dynamic` prefixes with `includeIcons`/`lazyIcons` and explicit `*` patterns.
+- Replace `component: "MyIcon"` with `import { Icon as MyIcon } from "znaki"`.
+- Update custom scanners to return `{ names, dynamic }`; `literals` and `prefixes` are no longer supported.
+- Add dimensions to SVGs that lack them. Resolve duplicate source names or opt into `allowOverrides`.
 
 ## License
 
-This project is licensed under the terms of the [MIT License](/LICENSE).
+[MIT](LICENSE).

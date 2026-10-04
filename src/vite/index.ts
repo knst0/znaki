@@ -1,159 +1,222 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { posix, resolve } from "node:path";
 
+import MagicString from "magic-string";
+import type { SourceMap } from "magic-string";
 import { normalizePath } from "vite";
-import type { EnvironmentModuleNode, Plugin } from "vite";
+import type { EnvironmentModuleGraph, EnvironmentModuleNode, Plugin } from "vite";
 
-import { shardKey, symbolId } from "../id.ts";
-import type { IconData } from "../types.ts";
+import { shardKey } from "../id.ts";
+import {
+  collectEntries,
+  groupByShard,
+  registryModuleCode,
+  shardKeys,
+  shardModuleCode,
+  shardToken,
+  spriteModuleCode,
+  SPRITE_TOKEN,
+} from "./artifacts.ts";
+import { compileIcons, componentModule } from "./compiler.ts";
 import { writeDts } from "./dts.ts";
 import {
-  ICON_PREFIX_RESOLVED,
-  iconName,
+  COMPONENT_ID,
   REGISTRY_ID,
   REGISTRY_RESOLVED,
+  SHARD_PREFIX,
   SHARD_PREFIX_RESOLVED,
-  shardId,
   shardName,
   SPRITE_ID,
   SPRITE_RESOLVED,
 } from "./ids.ts";
-import { scanIcons, scanLiterals } from "./scan.ts";
-import type { IconSource } from "./source.ts";
+import { buildManifest, expandPatterns, missingExact } from "./manifest.ts";
+import type { ZnakiOptions } from "./manifest.ts";
 import { SourceRegistry } from "./source.ts";
+import { spriteMarkup } from "./svg.ts";
 
 export { local } from "./sources/local.ts";
 export type { LocalOptions } from "./sources/local.ts";
 export { tabler } from "./sources/tabler.ts";
 export type { TablerOptions, TablerVariant } from "./sources/tabler.ts";
+export { library } from "./sources/library.ts";
+export type { LibraryOptions } from "./sources/library.ts";
+export { lucide } from "./sources/lucide.ts";
+export type { LucideOptions } from "./sources/lucide.ts";
 export type { IconSource } from "./source.ts";
+export type { FrameworkIntegration, FrameworkScanResult, ZnakiOptions, ZnakiTarget } from "./manifest.ts";
 
 const SOURCE_FILE_RE = /\.[tj]sx$/;
 const DEV_SPRITE_PATH = "/@znaki/sprite.svg";
-const SKIPPED_DIRS = new Set(["node_modules", "dist", "build", "coverage", "storybook-static"]);
-
-export interface FrameworkScanResult {
-  names: Iterable<string>;
-  dynamic: boolean;
-  literals?: Iterable<string>;
-  prefixes?: Iterable<string>;
-}
-
-export interface FrameworkIntegration {
-  /** Receives a normalized absolute file path, without a query string. */
-  include: (id: string) => boolean;
-  /** Analyze original source; errors fail the build rather than dropping icons. */
-  scan: (code: string, id: string, component: string) => FrameworkScanResult;
-}
-
-export interface ZnakiOptions {
-  sources: IconSource[];
-  component?: string;
-  framework?: FrameworkIntegration;
-  dynamic?: string[];
-  dts?: string | false;
-  include?: string[];
-  exclude?: string[];
-}
+const SPRITE_URL_TOKEN = "__ZNAKI_SPRITE_URL__";
+const SKIPPED_DIRS: Record<string, true> = { node_modules: true, dist: true, build: true, coverage: true, "storybook-static": true };
 
 interface FileIcons {
   names: Set<string>;
-  literals: Set<string>;
-  prefixes: Set<string>;
   dynamic: boolean;
 }
 
-export default function znaki(options: ZnakiOptions): Plugin {
-  const component = options.component ?? "Icon";
-  const componentRe = new RegExp(`<${escapeRegex(component)}\\b`);
-  const registry = new SourceRegistry(options.sources);
-  const byFile = new Map<string, FileIcons>();
-  const warned = new Set<string>();
-  const loadedShards = new Set<string>();
+interface EnvState {
+  files: Map<string, FileIcons>;
+  warned: Set<string>;
+  loadedShards: Set<string>;
+  spriteRef: string | null;
+  spriteRequested: boolean;
+}
 
+interface TransformAnalysis {
+  code: string;
+  map?: SourceMap;
+}
+
+export default function znaki(options: ZnakiOptions): Plugin {
+  const target = options.target ?? "react";
+  const includePatterns = [...(options.includeIcons ?? [])].sort();
+  const lazyPatterns = [...(options.lazyIcons ?? [])].sort();
+  const lazyEnabled = lazyPatterns.length > 0;
+  const registry = new SourceRegistry(options.sources);
+  const states = new Map<string, EnvState>();
+
+  let base = "/";
   let dtsPath: string | false = false;
   let excludedPaths = new Set<string>();
-  let base = "/";
-  let spriteRef: string | null = null;
   let spriteVersion = 0;
+  let componentPath = normalizePath(resolve(".znaki/component.tsx"));
 
-  function spriteNames(): Set<string> {
-    const dynamic = anyDynamic();
-    const names = new Set<string>();
-    for (const file of byFile.values()) {
-      for (const name of file.names) names.add(name);
-      if (dynamic) for (const name of file.literals) names.add(name);
+  function stateFor(environment: { name: string }): EnvState {
+    // Keyed per environment; harnesses without a name share one key consistently.
+    const key = `${environment.name}`;
+    let state = states.get(key);
+    if (!state) {
+      state = { files: new Map(), warned: new Set(), loadedShards: new Set(), spriteRef: null, spriteRequested: false };
+      states.set(key, state);
     }
-    return names;
+    return state;
   }
 
-  function dynamicPrefixes(): string[] {
-    if (!anyDynamic()) return [];
-    const prefixes = new Set(options.dynamic);
-    for (const file of byFile.values()) for (const prefix of file.prefixes) prefixes.add(prefix);
-    return [...prefixes].sort();
+  function manifestFor(state: EnvState): { sprite: string[]; lazy: string[] } {
+    const collected = new Set<string>();
+    for (const file of state.files.values()) {
+      for (const name of file.names) collected.add(name);
+    }
+    const available = registry.names();
+    return buildManifest({
+      collected,
+      includeExpanded: expandPatterns(includePatterns, available),
+      lazyExpanded: expandPatterns(lazyPatterns, available),
+    });
   }
 
-  function dynamicNames(): string[] {
-    const allowed = dynamicPrefixes();
-    if (allowed.length === 0) return [];
-    const sprite = spriteNames();
-    return registry.names().filter((name) => !sprite.has(name) && allowed.some((entry) => name.startsWith(entry)));
+  function snapshot(state: EnvState): string {
+    const manifest = manifestFor(state);
+    return `${manifest.sprite.join("\0")}\n${manifest.lazy.join("\0")}`;
   }
 
-  function snapshot(): Snapshot {
-    const sprite = [...spriteNames()].sort().join("\0");
-    return { sprite, registry: anyDynamic() ? `${sprite}\n${dynamicPrefixes().join("\0")}` : "" };
+  function checkCollisions(): void {
+    if (options.allowOverrides) return;
+    const collisions = registry.collisions();
+    if (collisions.size === 0) return;
+    const sample = [...collisions.keys()]
+      .sort()
+      .slice(0, 10)
+      .map((name) => `"${name}"`)
+      .join(", ");
+    throw new Error(`znaki: icon name collision for ${sample} provided by multiple sources — set allowOverrides to keep first-source wins`);
   }
 
-  function anyDynamic(): boolean {
-    for (const file of byFile.values()) if (file.dynamic) return true;
-    return false;
+  function reportExplicitMissing(state: EnvState, mode: string, warn: (message: string) => void): void {
+    if (includePatterns.length === 0 && lazyPatterns.length === 0) return;
+    const available = new Set(registry.names());
+    const missing = [...missingExact(includePatterns, available), ...missingExact(lazyPatterns, available)];
+    for (const name of missing) {
+      if (mode === "dev") {
+        const key = `explicit\0${name}`;
+        if (state.warned.has(key)) continue;
+        state.warned.add(key);
+        warn(`znaki: icon "${name}" not found in any configured source`);
+      } else {
+        throw new Error(`znaki: icon "${name}" not found in any configured source`);
+      }
+    }
   }
 
   function accepts(id: string): boolean {
-    return !id.includes("?") && !id.includes("\0") && (options.framework?.include(id) || SOURCE_FILE_RE.test(id));
+    if (id.includes("?") || id.includes("\0")) return false;
+    return (options.framework?.include(id) ?? false) || SOURCE_FILE_RE.test(id);
   }
 
-  function record(id: string, code: string, warn: (msg: string) => void): void {
+  function record(state: EnvState, id: string, code: string, mode: string, warn: (message: string) => void): TransformAnalysis | null {
     const names = new Set<string>();
-    const custom = options.framework?.include(id) ? options.framework.scan(code, id, component) : null;
-    const scanned = custom ?? (componentRe.test(code) ? scanIcons(code, component) : null);
-    const dynamic = scanned?.dynamic ?? false;
-    if (scanned) {
-      for (const name of scanned.names) {
-        if (registry.resolve(name)) names.add(name);
-        else if (!warned.has(`${id}\0${name}`)) {
-          warned.add(`${id}\0${name}`);
-          warn(`znaki: icon "${name}" not found in any configured source`);
-        }
+    let dynamic = false;
+    let analysis: TransformAnalysis | null = null;
+
+    const custom = options.framework?.include(id) ? options.framework.scan(code, id) : null;
+    if (custom) {
+      for (const name of custom.names) names.add(name);
+      dynamic = custom.dynamic;
+    }
+
+    if (SOURCE_FILE_RE.test(id)) {
+      const compiled = compileIcons(code, id, { target, lazy: lazyEnabled });
+      if (compiled) {
+        for (const name of compiled.names) names.add(name);
+        dynamic = dynamic || compiled.dynamic;
+        analysis = { code: compiled.code, map: compiled.map };
       }
     }
 
-    const candidates = custom ? { strings: custom.literals ?? [], prefixes: custom.prefixes ?? [] } : scanLiterals(code);
-    const literals = new Set<string>();
-    for (const value of candidates.strings) if (registry.has(value)) literals.add(value);
-    const prefixes = new Set<string>();
-    for (const prefix of candidates.prefixes) {
-      if (registry.names().some((name) => name.startsWith(prefix))) prefixes.add(prefix);
+    const known = new Set<string>();
+    for (const name of names) {
+      if (registry.resolve(name)) {
+        known.add(name);
+        continue;
+      }
+      if (mode === "dev") {
+        const key = `${id}\0${name}`;
+        if (!state.warned.has(key)) {
+          state.warned.add(key);
+          warn(`znaki: icon "${name}" not found in any configured source`);
+        }
+      } else {
+        throw new Error(`znaki: icon "${name}" used in ${id} not found in any configured source`);
+      }
     }
 
-    if (names.size > 0 || dynamic || literals.size > 0 || prefixes.size > 0) byFile.set(id, { names, literals, prefixes, dynamic });
-    else byFile.delete(id);
+    if (known.size > 0 || dynamic) state.files.set(id, { names: known, dynamic });
+    else state.files.delete(id);
+
+    return analysis;
   }
 
-  async function collectDir(dir: string, warn: (msg: string) => void): Promise<void> {
+  async function collectDir(dir: string, state: EnvState, mode: string, warn: (message: string) => void): Promise<void> {
     const entries = await readdir(dir, { withFileTypes: true });
     await Promise.all(
       entries.map(async (entry) => {
-        if (SKIPPED_DIRS.has(entry.name) || entry.name.startsWith(".") || entry.isSymbolicLink()) return;
+        if (SKIPPED_DIRS[entry.name] || entry.name.startsWith(".") || entry.isSymbolicLink()) return;
         const full = normalizePath(resolve(dir, entry.name));
         if (excludedPaths.has(full)) return;
-        if (entry.isDirectory()) await collectDir(full, warn);
-        else if (accepts(full)) record(full, await readFile(full, "utf-8"), warn);
+        if (entry.isDirectory()) {
+          await collectDir(full, state, mode, warn);
+          return;
+        }
+        if (accepts(full)) record(state, full, await readFile(full, "utf-8"), mode, warn);
       }),
     );
+  }
+
+  function finishHotUpdate(
+    state: EnvState,
+    environment: { moduleGraph: EnvironmentModuleGraph },
+    before: string,
+    modules: unknown,
+  ): EnvironmentModuleNode[] {
+    const after = snapshot(state);
+    const pending = modules as EnvironmentModuleNode[];
+    if (after === before) return [...pending];
+    const [beforeSprite, beforeLazy] = before.split("\n");
+    const [afterSprite, afterLazy] = after.split("\n");
+    if (afterSprite !== beforeSprite) spriteVersion += 1;
+    return [...pending, ...invalidateVirtual(environment, state.loadedShards, afterLazy !== beforeLazy)];
   }
 
   return {
@@ -162,6 +225,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
     configResolved(config) {
       base = config.base;
+      componentPath = normalizePath(resolve(config.root, ".znaki", `component-${target}.tsx`));
       dtsPath = options.dts === false ? false : resolve(config.root, options.dts ?? "znaki.d.ts");
       excludedPaths = new Set([config.build.outDir, ...(options.exclude ?? [])].map((dir) => normalizePath(resolve(config.root, dir))));
     },
@@ -174,123 +238,166 @@ export default function znaki(options: ZnakiOptions): Plugin {
         }
         response.setHeader("Content-Type", "image/svg+xml");
         response.setHeader("Cache-Control", "no-cache");
-        response.end(spriteMarkup(registry, spriteNames()));
+        const state = states.get("client") ?? [...states.values()][0];
+        const names = state ? manifestFor(state).sprite : [];
+        response.end(spriteMarkup(collectEntries(registry, names)));
       });
     },
 
     async buildStart() {
-      byFile.clear();
-      warned.clear();
-      loadedShards.clear();
-      registry.init(this.environment.config.root);
-      spriteRef = null;
-
-      if (dtsPath) writeDts(dtsPath, registry.names());
-
+      const state: EnvState = { files: new Map(), warned: new Set(), loadedShards: new Set(), spriteRef: null, spriteRequested: false };
+      states.set(`${this.environment.name}`, state);
       const root = this.environment.config.root;
+      const mode = this.environment.mode;
+      registry.init(root);
+      checkCollisions();
+      if (dtsPath) writeDts(dtsPath, registry.names(), target);
+      reportExplicitMissing(state, mode, (message) => this.warn(message));
       const warn = (message: string): void => this.warn(message);
       await Promise.all(
         (options.include ?? [root]).map(async (dir) => {
           const full = normalizePath(resolve(root, dir));
-          if (existsSync(full)) await collectDir(full, warn);
+          if (existsSync(full)) await collectDir(full, state, mode, warn);
         }),
       );
-
       for (const dir of registry.watchDirs) this.addWatchFile(dir);
     },
 
     resolveId(id) {
       if (id === SPRITE_ID) return SPRITE_RESOLVED;
       if (id === REGISTRY_ID) return REGISTRY_RESOLVED;
-      if (id.startsWith("virtual:znaki/icon/") || id.startsWith("virtual:znaki/shard/")) return `\0${id}`;
+      if (id.startsWith(SHARD_PREFIX)) return `\0${id}`;
+      if (id === COMPONENT_ID || id === componentPath || id === `/.znaki/component-${target}.tsx`) return componentPath;
       return null;
     },
 
     load(id) {
+      const state = stateFor(this.environment);
+      const mode = this.environment.mode;
       if (id === SPRITE_RESOLVED) {
-        const names = [...spriteNames()].map((name) => JSON.stringify(name)).join(", ");
-        let url: string;
-        if (this.environment.mode === "dev") {
-          url = JSON.stringify(`${base}${DEV_SPRITE_PATH.slice(1)}?v=${spriteVersion}`);
-        } else {
-          spriteRef ??= this.emitFile({
-            type: "asset",
-            name: "znaki-sprite.svg",
-            source: spriteMarkup(registry, spriteNames()),
-          });
-          url = `import.meta.ROLLUP_FILE_URL_${spriteRef}`;
+        const manifest = manifestFor(state);
+        if (mode === "dev") {
+          return spriteModuleCode(JSON.stringify(`${base}${DEV_SPRITE_PATH.slice(1)}?v=${spriteVersion}`), manifest.sprite);
         }
-        return `export const spriteUrl = ${url};\nexport const staticNames = new Set([${names}]);\n`;
+        state.spriteRequested = true;
+        return spriteModuleCode(JSON.stringify(SPRITE_URL_TOKEN), null);
       }
-      if (id === REGISTRY_RESOLVED) return buildRegistry(dynamicNames());
+      if (id === REGISTRY_RESOLVED) {
+        // Candidates are final here: the bundler resolves these imports at load
+        // time and renderChunk only fills payloads, never adds imports.
+        if (mode === "dev") return registryModuleCode(shardKeys(manifestFor(state).lazy));
+        return registryModuleCode(shardKeys(expandPatterns(lazyPatterns, registry.names())));
+      }
       if (id.startsWith(SHARD_PREFIX_RESOLVED)) {
         const key = shardName(id);
-        loadedShards.add(key);
-        return buildShard(
-          registry,
-          dynamicNames().filter((name) => shardKey(name) === key),
-        );
+        state.loadedShards.add(key);
+        if (mode === "dev") {
+          const names = manifestFor(state).lazy.filter((name) => shardKey(name) === key);
+          return shardModuleCode(key, collectEntries(registry, names));
+        }
+        return shardModuleCode(key);
       }
-      if (id.startsWith(ICON_PREFIX_RESOLVED)) {
-        const data = registry.resolve(iconName(id));
-        return data ? `export default ${JSON.stringify(data)};\n` : null;
-      }
+      if (id === componentPath) return componentModule(target);
       return null;
     },
 
     transform(code, id) {
-      id = normalizePath(id);
-      if (!accepts(id) || id.split("/").includes("node_modules")) return null;
-
-      const before = spriteRef ? spriteNames() : null;
-      const stateBefore = snapshot();
-      record(id, code, (message) => this.warn(message));
-
-      const stateAfter = snapshot();
-      const registryChanged = stateBefore.registry !== stateAfter.registry;
-      if (this.environment.mode === "dev" && (stateBefore.sprite !== stateAfter.sprite || registryChanged)) {
-        if (stateBefore.sprite !== stateAfter.sprite) spriteVersion += 1;
-        invalidateVirtual(this.environment, loadedShards, registryChanged);
+      const path = normalizePath(id);
+      if (path === componentPath || !accepts(path) || path.split("/").includes("node_modules")) return null;
+      const state = stateFor(this.environment);
+      const mode = this.environment.mode;
+      const before = snapshot(state);
+      const analysis = record(state, path, code, mode, (message) => this.warn(message));
+      const after = snapshot(state);
+      if (mode === "dev" && after !== before) {
+        const [beforeSprite, beforeLazy] = before.split("\n");
+        const [afterSprite, afterLazy] = after.split("\n");
+        if (afterSprite !== beforeSprite) spriteVersion += 1;
+        invalidateVirtual(this.environment, state.loadedShards, afterLazy !== beforeLazy);
       }
+      if (!analysis) return null;
+      return { code: analysis.code, map: analysis.map };
+    },
 
-      if (before) {
-        const late = [...spriteNames()].filter((name) => !before.has(name));
-        if (late.length > 0) {
-          this.warn(
-            `znaki: ${late.map((name) => `"${name}"`).join(", ")} found in ${id} after the sprite was emitted — add its directory to "include"`,
-          );
-        }
+    renderStart() {
+      if (this.environment.mode === "dev") return;
+      const state = states.get(`${this.environment.name}`);
+      if (!state?.spriteRequested) return;
+      const manifest = manifestFor(state);
+      state.spriteRef = this.emitFile({
+        type: "asset",
+        name: "znaki-sprite.svg",
+        source: spriteMarkup(collectEntries(registry, manifest.sprite)),
+      });
+    },
+
+    renderChunk(code, chunk) {
+      // Fill JSON.parse("marker") payloads before chunk hashes are computed, so
+      // transform order never changes delivery. Imports are untouched: registry
+      // shards were resolved by the bundler, only string payloads are replaced.
+      if (this.environment.mode === "dev") return null;
+      if (!code.includes("__ZNAKI_")) return null;
+      const state = states.get(`${this.environment.name}`);
+      if (!state) return null;
+      const manifest = manifestFor(state);
+      const shards = groupByShard(collectEntries(registry, manifest.lazy));
+      const output = new MagicString(code);
+      let touched = inject(output, code, JSON.stringify(SPRITE_TOKEN), JSON.stringify(JSON.stringify(manifest.sprite)));
+      if (state.spriteRef) {
+        const fileName = this.getFileName(state.spriteRef);
+        const url =
+          base === "" || base === "./"
+            ? `new URL(${JSON.stringify(posix.relative(posix.dirname(chunk.fileName), fileName))}, import.meta.url).href`
+            : JSON.stringify(`${base}${fileName}`);
+        touched = inject(output, code, JSON.stringify(SPRITE_URL_TOKEN), url) || touched;
       }
-
-      return null;
+      for (const key of shardKeys(expandPatterns(lazyPatterns, registry.names()))) {
+        const payload = Object.fromEntries(shards.get(key) ?? []);
+        touched = inject(output, code, JSON.stringify(shardToken(key)), JSON.stringify(JSON.stringify(payload))) || touched;
+      }
+      if (!touched) return null;
+      return { code: output.toString(), map: output.generateMap({ source: chunk.fileName, hires: true, includeContent: true }) };
     },
 
     hotUpdate({ file, read, modules }) {
-      file = normalizePath(file);
-      const fromSourceDir = registry.watchDirs.some((dir) => file.startsWith(`${dir}/`));
-      if (!fromSourceDir && (!accepts(file) || file.split("/").includes("node_modules"))) return;
+      const path = normalizePath(file);
+      const environment = this.environment;
+      const state = stateFor(environment);
+      const fromSourceDir = registry.watchDirs.some((dir) => path === dir || path.startsWith(`${dir}/`));
+      if (!fromSourceDir && (!accepts(path) || path.split("/").includes("node_modules"))) return;
+      const warn = (message: string): void => this.warn(message);
 
       if (fromSourceDir) {
-        registry.invalidate();
-        warned.clear();
-        if (dtsPath) writeDts(dtsPath, registry.names());
+        return (async () => {
+          registry.init(environment.config.root);
+          state.warned.clear();
+          checkCollisions();
+          if (dtsPath) writeDts(dtsPath, registry.names(), target);
+          reportExplicitMissing(state, environment.mode, warn);
+          await Promise.all(
+            [...state.files.keys()].map(async (tracked) => {
+              let code: string;
+              try {
+                code = await readFile(tracked, "utf-8");
+              } catch {
+                state.files.delete(tracked);
+                return;
+              }
+              record(state, tracked, code, environment.mode, warn);
+            }),
+          );
+          // Source content can change invisibly to name snapshots (same names,
+          // new geometry), so force a fresh sprite URL and invalidate the
+          // sprite, registry, and every loaded shard.
+          spriteVersion += 1;
+          return [...(modules as EnvironmentModuleNode[]), ...invalidateVirtual(environment, state.loadedShards, true)];
+        })();
       }
 
-      const stateBefore = snapshot();
-
-      const finish = (): EnvironmentModuleNode[] => {
-        const stateAfter = snapshot();
-        if (!fromSourceDir && stateBefore.sprite === stateAfter.sprite && stateBefore.registry === stateAfter.registry) return [...modules];
-
-        const registryChanged = stateBefore.registry !== stateAfter.registry || (fromSourceDir && anyDynamic());
-        if (fromSourceDir || stateBefore.sprite !== stateAfter.sprite) spriteVersion += 1;
-        return [...modules, ...invalidateVirtual(this.environment, loadedShards, registryChanged)];
-      };
-
-      if (fromSourceDir) return finish();
       return Promise.resolve(read()).then((code) => {
-        record(file, code, (message) => this.warn(message));
-        return finish();
+        const before = snapshot(state);
+        record(state, path, code, environment.mode, warn);
+        return finishHotUpdate(state, environment, before, modules);
       });
     },
   };
@@ -303,13 +410,20 @@ function isDevSpriteRequest(url: string | undefined, base: string): boolean {
   return path === DEV_SPRITE_PATH || path === withBase;
 }
 
-interface Snapshot {
-  sprite: string;
-  registry: string;
+function inject(output: MagicString, source: string, search: string, replacement: string): boolean {
+  let found = false;
+  let from = 0;
+  for (;;) {
+    const start = source.indexOf(search, from);
+    if (start === -1) return found;
+    output.overwrite(start, start + search.length, replacement);
+    found = true;
+    from = start + search.length;
+  }
 }
 
 function invalidateVirtual(
-  environment: { moduleGraph: import("vite").EnvironmentModuleGraph },
+  environment: { moduleGraph: EnvironmentModuleGraph },
   shards: Set<string>,
   registryChanged: boolean,
 ): EnvironmentModuleNode[] {
@@ -320,7 +434,7 @@ function invalidateVirtual(
     affected.push(sprite);
   }
   if (registryChanged) {
-    for (const id of [REGISTRY_RESOLVED, ...[...shards].map((key) => `\0${shardId(key)}`)]) {
+    for (const id of [REGISTRY_RESOLVED, ...[...shards].map((key) => `\0virtual:znaki/shard/${key}`)]) {
       const module = environment.moduleGraph.getModuleById(id);
       if (module) {
         environment.moduleGraph.invalidateModule(module);
@@ -329,61 +443,4 @@ function invalidateVirtual(
     }
   }
   return affected;
-}
-
-function spriteMarkup(registry: SourceRegistry, names: Set<string>): string {
-  const symbols = [...names]
-    .map((name) => {
-      const data = registry.resolve(name);
-      return data ? symbolMarkup(name, data) : "";
-    })
-    .join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${symbols}</svg>`;
-}
-
-function symbolMarkup(name: string, data: IconData): string {
-  const attrs = Object.entries(data.attrs)
-    .map(([key, value]) => ` ${key}="${escapeAttr(value)}"`)
-    .join("");
-  const id = symbolId(name);
-  return `<symbol id="${id}" viewBox="${escapeAttr(data.viewBox)}"${attrs}>${prefixIds(data.body, id)}</symbol>`;
-}
-
-const INNER_ID_RE = /\bid="([^"]+)"/g;
-
-function prefixIds(body: string, prefix: string): string {
-  const ids = [...body.matchAll(INNER_ID_RE)].map((match) => match[1]);
-  let result = body;
-  for (const id of new Set(ids)) {
-    const escaped = escapeRegex(id);
-    result = result
-      .replaceAll(new RegExp(`\\bid="${escaped}"`, "g"), `id="${prefix}-${id}"`)
-      .replaceAll(new RegExp(`url\\(\\s*#${escaped}\\s*\\)`, "g"), `url(#${prefix}-${id})`)
-      .replaceAll(new RegExp(`href="#${escaped}"`, "g"), `href="#${prefix}-${id}"`);
-  }
-  return result;
-}
-
-function escapeAttr(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
-}
-
-function escapeRegex(value: string): string {
-  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function buildRegistry(names: string[]): string {
-  const keys = [...new Set(names.map((name) => shardKey(name)))].sort();
-  const lines = keys.map((key) => `  ${JSON.stringify(key)}: () => import(${JSON.stringify(shardId(key))}),`);
-  return `export const shards = {\n${lines.join("\n")}\n};\n`;
-}
-
-function buildShard(registry: SourceRegistry, names: string[]): string {
-  const entries = names
-    .map((name) => {
-      const data = registry.resolve(name);
-      return data ? `  ${JSON.stringify(name)}: ${JSON.stringify(data)},` : "";
-    })
-    .filter(Boolean);
-  return `export default {\n${entries.join("\n")}\n};\n`;
 }
