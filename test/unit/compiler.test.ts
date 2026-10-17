@@ -26,6 +26,16 @@ describe("intrinsic discovery", () => {
 });
 
 describe("intrinsic diagnostics", () => {
+  it("hints at plugin order when the file was already compiled by a JSX plugin", () => {
+    const code = 'import { Icon } from "znaki"; import { jsx } from "react/jsx-runtime"; const C = () => jsx(Icon, { name: "a" });';
+    expect(() => compile(code)).toThrow(/register znaki before your framework's JSX plugin/);
+  });
+
+  it("does not hint at plugin order when the file still contains JSX", () => {
+    const code = 'import { Icon } from "znaki"; const X = Icon; const C = () => <Icon name="a"/>;';
+    expect(() => compile(code)).toThrow(/cannot be used as a value$/);
+  });
+
   it.each([
     'import { Icon } from "znaki"; const X = Icon;',
     'import * as Z from "znaki"; const X = Z.Icon;',

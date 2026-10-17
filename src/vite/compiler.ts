@@ -14,6 +14,8 @@ const ZNAKI_SOURCE = "znaki";
 const RUNTIME_SOURCE = "znaki/runtime";
 const FROM_ZNAKI_RE = /(?:from|import)\s*["']znaki["']/;
 const INTRINSIC_NAMES: Record<string, true> = { Icon: true, PreloadSprite: true };
+const PRECOMPILED_HINT =
+  " (this file contains no JSX, so another plugin probably compiled it first; register znaki before your framework's JSX plugin)";
 
 interface N {
   type: string;
@@ -38,6 +40,7 @@ interface FileState {
   dynamic: boolean;
   dynamicOffset: number | null;
   dirty: boolean;
+  hasJsx: boolean;
   needSpriteHref: string | null;
   needSvgProps: string | null;
   needSpriteUrl: string | null;
@@ -84,6 +87,7 @@ export function compileIcons(code: string, id: string): CompileIconsResult | nul
     dynamic: false,
     dynamicOffset: null,
     dirty: false,
+    hasJsx: false,
     needSpriteHref: null,
     needSvgProps: null,
     needSpriteUrl: null,
@@ -99,6 +103,7 @@ export function compileIcons(code: string, id: string): CompileIconsResult | nul
       const name = strField(node, "name");
       if (name) file.taken.add(name);
     }
+    if (node.type === "JSXElement" || node.type === "JSXFragment") file.hasJsx = true;
     for (const child of childEntries(node)) nodes.push(child.node);
   }
 
@@ -462,7 +467,8 @@ function checkReference(node: N, file: FileState, scope: Scope): void {
   if (!name) return;
   const binding = resolveBinding(name, scope);
   if (binding === "icon" || binding === "preload" || binding === "namespace") {
-    fail(file, node, `"${name}" imported from "znaki" is a compile-time intrinsic and cannot be used as a value`);
+    const hint = file.hasJsx ? "" : PRECOMPILED_HINT;
+    fail(file, node, `"${name}" imported from "znaki" is a compile-time intrinsic and cannot be used as a value${hint}`);
   }
 }
 
