@@ -8,6 +8,8 @@ export const SPRITE_TOKEN = "__ZNAKI_SPRITE_NAMES__";
 export const LAZY_TOKEN = "__ZNAKI_LAZY_NAMES__";
 export const SPRITE_URL_TOKEN = "__ZNAKI_SPRITE_URL__";
 export const LAZY_URL_TOKEN = "__ZNAKI_LAZY_URL__";
+export const INLINE_TOKEN = "__ZNAKI_INLINE__";
+export const SPRITE_MARKUP_TOKEN = "__ZNAKI_SPRITE_MARKUP__";
 
 export type SpriteEntry = [string, IconData];
 
@@ -26,6 +28,7 @@ export function spriteModuleCode(
   lazyUrlExpression: string,
   spriteNames: readonly string[] | null,
   lazyNames: readonly string[] | null,
+  inline: boolean | null,
 ): string {
   const spriteSet =
     spriteNames === null
@@ -37,6 +40,16 @@ export function spriteModuleCode(
     `export const spriteUrl = ${spriteUrlExpression};\n` +
     `export const lazySpriteUrl = ${lazyUrlExpression};\n` +
     `export const staticNames = new Set(${spriteSet});\n` +
-    `export const lazyNames = new Set(${lazySet});\n`
+    `export const lazyNames = new Set(${lazySet});\n` +
+    `export const inlineSprite = ${inline === null ? `JSON.parse(${JSON.stringify(INLINE_TOKEN)})` : String(inline)};\n`
   );
+}
+
+/**
+ * The inline markup lives in its own module, imported only by compiled
+ * `<PreloadSprite inline />`, so chunks that merely render icons never carry it
+ * (bundlers keep a shared chunk's whole export surface).
+ */
+export function inlineModuleCode(markup: string | null): string {
+  return `export const spriteMarkup = ${JSON.stringify(markup ?? SPRITE_MARKUP_TOKEN)};\n`;
 }

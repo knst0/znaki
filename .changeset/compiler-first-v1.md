@@ -16,11 +16,11 @@ znaki v1 compiles icon JSX into ordinary `<svg><use /></svg>` elements and serve
 
 ### Icon delivery and diagnostics
 
-- Statically discovered icons and `includeIcons` populate the main sprite. `lazyIcons` populates one separate SVG sprite, which the browser loads in full on first use. Static delivery takes precedence when an icon matches both lists. `PreloadSprite` preloads only the main sprite.
+- Statically discovered icons and `includeIcons` populate the main sprite. `lazyIcons` populates one separate SVG sprite, which the browser loads in full on first use. Static delivery takes precedence when an icon matches both lists. `PreloadSprite` preloads the main sprite, or embeds it with `inline`.
 - Dynamic icon names without either delivery list emit a warning with the source location and configuration guidance, deduplicated per source file. Dynamic usage does not automatically include the whole catalogue; TypeScript name checking does not configure delivery.
 - Both sprites are finalized from a shared manifest after module discovery and before chunk hashing. Vite 7 and 8, relative base URLs and source-catalogue hot updates are supported.
 - JSX query modules, including filesystem-routing selections such as `index.tsx?pick=default&pick=$css&lang.tsx`, receive the icon transform. Distinct query selections retain their own discovered icons, while `?raw` and `?url` remain asset requests.
-- Symbol IDs avoid collisions, and SVG definitions are scoped within each symbol. All icons use external SVG sprites rather than inline-markup renderers.
+- Symbol IDs avoid collisions, and SVG definitions are scoped within each symbol. Icons reference external SVG sprites by default; `<PreloadSprite inline />` embeds the main sprite so its icons use same-document references.
 
 ### New icon sources
 

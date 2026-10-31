@@ -35,6 +35,18 @@ describe("development delivery", () => {
     expect(await (await harness.request("/@znaki/sprite.svg")).text()).toContain('id="znaki-i_3a_user"');
   });
 
+  it("fills the SSR inline sprite with icons from the client startup scan", async () => {
+    project.file("main.tsx", `import { Icon } from "znaki"; export const C = () => <Icon name="i:home"/>;`);
+    project.file("document.tsx", `import { PreloadSprite } from "znaki"; export const D = () => <PreloadSprite inline/>;`);
+    harness = await createDevHarness({ root: project.root, sources: [memorySource()] });
+    await harness.transform("virtual:znaki/sprite");
+    const ssr = harness.server.environments.ssr;
+    const inline = (await ssr.transformRequest("virtual:znaki/inline-sprite"))?.code ?? "";
+    expect(inline).toContain('id=\\"znaki-i_3a_home\\"');
+    const sprite = (await ssr.transformRequest("virtual:znaki/sprite"))?.code ?? "";
+    expect(sprite).toContain("inlineSprite = true");
+  });
+
   it("serves an explicit lazy set from its own endpoint without a JSX usage", async () => {
     project.file("main.tsx", `export const n = 1;`);
     harness = await createDevHarness({ root: project.root, sources: [memorySource()], options: { lazyIcons: ["i:user"] } });

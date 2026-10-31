@@ -8,10 +8,17 @@ export interface CompileIconsResult {
   names: Set<string>;
   dynamic: boolean;
   dynamicLocation: string | null;
+  inline: boolean;
+}
+
+export interface CompileIconsOptions {
+  /** JSX prop that injects raw markup: `innerHTML` (Solid, reze) or `dangerouslySetInnerHTML` (React). */
+  htmlProp?: "innerHTML" | "dangerouslySetInnerHTML";
 }
 
 const ZNAKI_SOURCE = "znaki";
 const RUNTIME_SOURCE = "znaki/runtime";
+const INLINE_SOURCE = "virtual:znaki/inline-sprite";
 const FROM_ZNAKI_RE = /(?:from|import)\s*["']znaki["']/;
 const INTRINSIC_NAMES: Record<string, true> = { Icon: true, PreloadSprite: true };
 const PRECOMPILED_HINT =
@@ -41,15 +48,19 @@ interface FileState {
   dynamicOffset: number | null;
   dirty: boolean;
   hasJsx: boolean;
+  htmlProp: "innerHTML" | "dangerouslySetInnerHTML";
+  inline: boolean;
   needSpriteHref: string | null;
   needSvgProps: string | null;
   needSpriteUrl: string | null;
+  needSpriteMarkup: string | null;
 }
 
 /**
  * Lowers the `Icon` / `PreloadSprite` compile-time intrinsics imported from
  * `"znaki"` into ordinary JSX `<svg><use /></svg>`, collecting the icon names
- * the file needs.
+ * the file needs. `<PreloadSprite inline />` is the one exception to "no
+ * inline SVG body": it embeds the main sprite's symbols through `htmlProp`.
  *
  * Backend-independent: every `Icon` becomes a direct `<svg><use /></svg>`
  * whose `href` resolves through the synchronous runtime `spriteHref` (main
@@ -66,7 +77,7 @@ interface FileState {
  * intrinsic usages that cannot be lowered throw a `znaki:` diagnostic instead
  * of silently becoming missing icons.
  */
-export function compileIcons(code: string, id: string): CompileIconsResult | null {
+export function compileIcons(code: string, id: string, options: CompileIconsOptions = {}): CompileIconsResult | null {
   if (!FROM_ZNAKI_RE.test(code)) return null;
 
   let program: N;
@@ -88,9 +99,12 @@ export function compileIcons(code: string, id: string): CompileIconsResult | nul
     dynamicOffset: null,
     dirty: false,
     hasJsx: false,
+    htmlProp: options.htmlProp ?? "innerHTML",
+    inline: false,
     needSpriteHref: null,
     needSvgProps: null,
     needSpriteUrl: null,
+    needSpriteMarkup: null,
   };
 
   const root: Scope = { parent: null, bindings: new Map() };
@@ -122,6 +136,7 @@ export function compileIcons(code: string, id: string): CompileIconsResult | nul
     names: file.names,
     dynamic: file.dynamic,
     dynamicLocation: file.dynamicOffset === null ? null : offsetToLineCol(file.code, file.dynamicOffset),
+    inline: file.inline,
   };
 }
 
@@ -585,11 +600,13 @@ function lowerIntrinsic(element: N, opening: N, kind: BindingKind, namespace: st
     fail(file, child, `<${display}> does not accept children`);
   }
   if (kind === "preload") {
-    if (attributes.length > 0) {
-      fail(file, attributes[0], `<${display}> does not accept props`);
+    if (preloadInline(attributes, display, file)) {
+      file.inline = true;
+      file.ms.overwrite(element.start, element.end, lowerInlineSprite(file));
+    } else {
+      const spriteUrl = importName(file, "needSpriteUrl", "spriteUrl");
+      file.ms.overwrite(element.start, element.end, `<link rel="preload" as="image" type="image/svg+xml" href={${spriteUrl}} />`);
     }
-    const spriteUrl = importName(file, "needSpriteUrl", "spriteUrl");
-    file.ms.overwrite(element.start, element.end, `<link rel="preload" as="image" type="image/svg+xml" href={${spriteUrl}} />`);
     file.dirty = true;
     return;
   }
@@ -633,6 +650,38 @@ function lowerIntrinsic(element: N, opening: N, kind: BindingKind, namespace: st
   }
   file.ms.overwrite(element.start, element.end, lowerIconSvg(attrs, nameAttr, sizeAttr, display, file));
   file.dirty = true;
+}
+
+/** Only a static `inline` flag is accepted: it switches every main-sprite href, so it cannot vary at runtime. */
+function preloadInline(attributes: N[], display: string, file: FileState): boolean {
+  let inline = false;
+  for (const attribute of attributes) {
+    if (attribute.type !== "JSXAttribute" || attributeKey(attribute) !== "inline") {
+      fail(file, attribute, `<${display}> accepts only a static "inline" prop`);
+    }
+    const value = nodeField(attribute, "value");
+    if (!value) {
+      inline = true;
+      continue;
+    }
+    const expression = value.type === "JSXExpressionContainer" ? nodeField(value, "expression") : null;
+    if (!expression || expression.type !== "Literal" || typeof expression.value !== "boolean") {
+      fail(file, attribute, `<${display}> "inline" must be a literal true or false`);
+    }
+    inline = expression.value;
+  }
+  return inline;
+}
+
+// Visually hidden but still rendered: `display: none` would break gradients and
+// clip paths that symbols reference by id. The host is an HTML element because
+// some JSX runtimes (reze) treat `innerHTML` on SVG elements as a plain attribute.
+const INLINE_SPRITE_STYLE = `{ position: "absolute", width: 0, height: 0, overflow: "hidden" }`;
+
+function lowerInlineSprite(file: FileState): string {
+  const markup = importName(file, "needSpriteMarkup", "spriteMarkup");
+  const html = file.htmlProp === "dangerouslySetInnerHTML" ? `dangerouslySetInnerHTML={{ __html: ${markup} }}` : `innerHTML={${markup}}`;
+  return `<div aria-hidden="true" style={${INLINE_SPRITE_STYLE}} ${html} />`;
 }
 
 function nameExpression(attr: IconAttr): N | null {
@@ -738,7 +787,11 @@ function propValue(attr: IconAttr, display: string, file: FileState): string {
   return file.code.slice(expression.start, expression.end);
 }
 
-function importName(file: FileState, slot: "needSpriteHref" | "needSvgProps" | "needSpriteUrl", exported: string): string {
+function importName(
+  file: FileState,
+  slot: "needSpriteHref" | "needSvgProps" | "needSpriteUrl" | "needSpriteMarkup",
+  exported: string,
+): string {
   const existing = file[slot];
   if (existing) return existing;
   const head = `${exported[0]?.toUpperCase() ?? ""}${exported.slice(1)}`;
@@ -814,11 +867,15 @@ function insertHelperImports(file: FileState, program: N, removals: Array<{ node
   if (file.needSpriteHref) runtime.push(["spriteHref", file.needSpriteHref]);
   if (file.needSvgProps) runtime.push(["svgProps", file.needSvgProps]);
   if (file.needSpriteUrl) runtime.push(["spriteUrl", file.needSpriteUrl]);
-  if (runtime.length === 0) return;
-  const rendered = runtime.map(([name, alias]) => (name === alias ? name : `${name} as ${alias}`)).join(", ");
+  const lines: string[] = [];
+  const render = (names: Array<[string, string]>, source: string): string =>
+    `import { ${names.map(([name, alias]) => (name === alias ? name : `${name} as ${alias}`)).join(", ")} } from ${JSON.stringify(source)};`;
+  if (runtime.length > 0) lines.push(render(runtime, RUNTIME_SOURCE));
+  if (file.needSpriteMarkup) lines.push(render([["spriteMarkup", file.needSpriteMarkup]], INLINE_SOURCE));
+  if (lines.length === 0) return;
   const position = insertPosition(file, program, removals);
-  const line = `import { ${rendered} } from ${JSON.stringify(RUNTIME_SOURCE)};`;
-  file.ms.appendLeft(position, position === 0 ? `${line}\n` : `\n${line}`);
+  const block = lines.join("\n");
+  file.ms.appendLeft(position, position === 0 ? `${block}\n` : `\n${block}`);
   file.dirty = true;
 }
 

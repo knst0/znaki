@@ -8,6 +8,7 @@ import { compilerPlugin } from "./test/helpers/compiler.ts";
 
 const root = import.meta.dirname;
 const virtualStubs = resolve(root, "test/fixtures/virtual.ts");
+const inlineStubs = resolve(root, "test/fixtures/inline-sprite.ts");
 
 const VITE = process.env.VITE_DEPENDENCY ?? "vite";
 
@@ -46,6 +47,7 @@ export default defineConfig({
             "znaki/runtime": resolve(root, "src/runtime/index.ts"),
             znaki: resolve(root, "src/index.ts"),
             "virtual:znaki/sprite": virtualStubs,
+            "virtual:znaki/inline-sprite": inlineStubs,
           },
         },
         test: {
@@ -55,12 +57,13 @@ export default defineConfig({
         },
       },
       {
-        plugins: [compilerPlugin(), react({ jsxImportSource: "react" })],
+        plugins: [compilerPlugin({ htmlProp: "dangerouslySetInnerHTML" }), react({ jsxImportSource: "react" })],
         resolve: {
           alias: {
             "znaki/runtime": resolve(root, "src/runtime/index.ts"),
             znaki: resolve(root, "src/index.ts"),
             "virtual:znaki/sprite": virtualStubs,
+            "virtual:znaki/inline-sprite": inlineStubs,
           },
         },
         test: {

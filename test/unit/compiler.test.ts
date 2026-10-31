@@ -45,6 +45,8 @@ describe("intrinsic diagnostics", () => {
     'import { Icon } from "znaki"; const C = () => <Icon/>;',
     'import { Icon } from "znaki"; const C = () => <Icon name="a">child</Icon>;',
     'import { PreloadSprite } from "znaki"; const C = () => <PreloadSprite href="x"/>;',
+    'import { PreloadSprite } from "znaki"; const C = (p) => <PreloadSprite inline={p.inline}/>;',
+    'import { PreloadSprite } from "znaki"; const C = (p) => <PreloadSprite {...p}/>;',
     'import { Icon } from "znaki"; const C = () => <Icon name="a" size/>;',
   ])("rejects unsupported intrinsic usage: %s", (code) => {
     expect(() => compile(code)).toThrow(/znaki: view\.tsx:/);
@@ -89,5 +91,29 @@ describe("output architecture", () => {
     expect(result?.code).toContain('<link rel="preload"');
     expect(result?.code).toContain("spriteUrl");
     expect(result?.code).not.toContain("svgProps");
+    expect(result?.inline).toBe(false);
+  });
+
+  it.each(["<PreloadSprite inline/>", "<PreloadSprite inline={true}/>"])("lowers %s to an inline sprite", (jsx) => {
+    const result = compile(`import { PreloadSprite } from "znaki"; const C = () => ${jsx};`);
+    expect(result?.inline).toBe(true);
+    expect(result?.code).toContain("innerHTML={__znakiSpriteMarkup}");
+    expect(result?.code).toContain('import { spriteMarkup as __znakiSpriteMarkup } from "virtual:znaki/inline-sprite";');
+    expect(result?.code).not.toContain("znaki/runtime");
+    expect(result?.code).not.toContain("<link");
+  });
+
+  it("keeps the preload link for inline={false}", () => {
+    const result = compile('import { PreloadSprite } from "znaki"; const C = () => <PreloadSprite inline={false}/>;');
+    expect(result?.inline).toBe(false);
+    expect(result?.code).toContain('<link rel="preload"');
+  });
+
+  it("injects inline sprite markup through dangerouslySetInnerHTML for React", () => {
+    const result = compileIcons('import { PreloadSprite } from "znaki"; const C = () => <PreloadSprite inline/>;', "view.tsx", {
+      htmlProp: "dangerouslySetInnerHTML",
+    });
+    expect(result?.code).toContain("dangerouslySetInnerHTML={{ __html: __znakiSpriteMarkup }}");
+    expect(result?.code).not.toContain("innerHTML={");
   });
 });

@@ -98,6 +98,29 @@ describe("lazy delivery", () => {
   });
 });
 
+describe("inline sprite", () => {
+  it("embeds the main sprite in the chunk and switches static hrefs to same-document ids", async () => {
+    project.file(
+      "main.tsx",
+      `import { Icon, PreloadSprite } from "znaki";
+      export const Doc = () => <><PreloadSprite inline/><Icon name="i:home"/></>;`,
+    );
+    const { chunk } = await bundle({ sources: [memorySource()], dts: false });
+    expect(chunk).toContain("<symbol id=");
+    expect(chunk).toContain("znaki-i_3a_home");
+    expect(chunk).toContain('JSON.parse("true")');
+    expect(chunk).not.toContain("__ZNAKI_");
+  });
+
+  it("leaves the markup out of chunks that never render the inline sprite", async () => {
+    project.file("main.tsx", `import { Icon } from "znaki"; export const C = () => <Icon name="i:home"/>;`);
+    const { chunk } = await bundle({ sources: [memorySource()], dts: false });
+    expect(chunk).not.toContain("<symbol");
+    expect(chunk).not.toContain("__ZNAKI_SPRITE_MARKUP__");
+    expect(chunk).toContain('JSON.parse("false")');
+  });
+});
+
 describe("declaration output", () => {
   it("writes names to a custom path and leaves declarations alone when disabled", async () => {
     project.file("main.tsx", `export const value = 1;`);

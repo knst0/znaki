@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { spriteHref, svgProps } from "../../src/runtime/index.ts";
 import { lazySpriteUrl, spriteUrl } from "../fixtures/virtual.ts";
@@ -10,6 +10,16 @@ describe("spriteHref", () => {
 
   it("resolves a lazy icon to the shared lazy sprite", () => {
     expect(spriteHref("i:lazy")).toBe(`${lazySpriteUrl}#znaki-i_3a_lazy`);
+  });
+
+  it("resolves static icons to same-document ids when the sprite is inlined", async () => {
+    vi.resetModules();
+    vi.doMock("virtual:znaki/sprite", async () => ({ ...(await import("../fixtures/virtual.ts")), inlineSprite: true }));
+    const runtime = await import("../../src/runtime/index.ts");
+    expect(runtime.spriteHref("i:sprited")).toBe("#znaki-i_3a_sprited");
+    expect(runtime.spriteHref("i:lazy")).toBe(`${lazySpriteUrl}#znaki-i_3a_lazy`);
+    vi.doUnmock("virtual:znaki/sprite");
+    vi.resetModules();
   });
 
   it("rejects an unconfigured name instead of rendering a broken reference", () => {

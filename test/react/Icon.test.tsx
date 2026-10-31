@@ -113,4 +113,13 @@ describe("PreloadSprite", () => {
     expect(link?.getAttribute("type")).toBe("image/svg+xml");
     expect(link?.getAttribute("href")).toBe(spriteUrl);
   });
+
+  it("inlines the main sprite in a hidden container", async () => {
+    const host = await mount(<PreloadSprite inline />);
+    const symbol = host.querySelector("div > svg > symbol");
+
+    expect(symbol?.getAttribute("id")).toBe("znaki-i_3a_sprited");
+    expect(symbol?.parentElement?.parentElement?.getAttribute("aria-hidden")).toBe("true");
+    expect(document.head.querySelector("link")).toBeNull();
+  });
 });

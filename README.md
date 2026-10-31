@@ -98,7 +98,26 @@ import { PreloadSprite } from "znaki";
 <PreloadSprite />;
 ```
 
-It takes no props or children.
+It takes no children.
+
+### Inline sprite
+
+Icons reference an external file, so the browser draws them empty until that file arrives, and they can flash on reload. To avoid this, embed the main sprite in the page:
+
+```tsx
+import { PreloadSprite } from "znaki";
+
+<body>
+  <PreloadSprite inline />…
+</body>;
+```
+
+Icons from the main sprite then use same-document references (`href="#…"`) and render with the first paint. Lazy icons still load from their own file.
+
+- Render it once, at the start of `<body>`, not in `<head>`: it is a hidden `<div>` holding the sprite's `<svg>`.
+- `inline` must be static (`inline` or `inline={true}`). It changes every main-sprite reference in the app, so the file must be inside the scanned `include` directories.
+- The sprite markup goes into the HTML and into the JS chunk of the component that renders it. Put it in a server-only document to keep it out of client bundles.
+- The markup is injected with `dangerouslySetInnerHTML` when a React Vite plugin is present and with `innerHTML` otherwise.
 
 ## Icon sources
 
@@ -223,7 +242,7 @@ function MenuIcon(props: { name: IconName }) {
 
 TypeScript checks names, but does not configure loading: `includeIcons` or `lazyIcons` is still required for this wrapper. Validate names received from external data before using them.
 
-Both paths emit `<svg><use href="…svg#symbol-id" /></svg>` and work without framework-specific loading components. `PreloadSprite` preloads only the main sprite.
+Both paths emit `<svg><use href="…svg#symbol-id" /></svg>` and work without framework-specific loading components. `PreloadSprite` preloads or inlines only the main sprite.
 
 ## Configuration reference
 

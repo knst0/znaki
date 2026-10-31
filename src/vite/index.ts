@@ -5,12 +5,23 @@ import { posix, resolve } from "node:path";
 import MagicString from "magic-string";
 import type { SourceMap } from "magic-string";
 import { normalizePath } from "vite";
-import type { EnvironmentModuleGraph, EnvironmentModuleNode, Plugin } from "vite";
+import type { EnvironmentModuleGraph, EnvironmentModuleNode, Plugin, ViteDevServer } from "vite";
 
-import { collectEntries, LAZY_TOKEN, LAZY_URL_TOKEN, spriteModuleCode, SPRITE_TOKEN, SPRITE_URL_TOKEN } from "./artifacts.ts";
+import {
+  collectEntries,
+  inlineModuleCode,
+  INLINE_TOKEN,
+  LAZY_TOKEN,
+  LAZY_URL_TOKEN,
+  spriteModuleCode,
+  SPRITE_MARKUP_TOKEN,
+  SPRITE_TOKEN,
+  SPRITE_URL_TOKEN,
+} from "./artifacts.ts";
 import { compileIcons } from "./compiler.ts";
+import type { CompileIconsOptions } from "./compiler.ts";
 import { writeDts } from "./dts.ts";
-import { SPRITE_ID, SPRITE_RESOLVED } from "./ids.ts";
+import { INLINE_ID, INLINE_RESOLVED, SPRITE_ID, SPRITE_RESOLVED } from "./ids.ts";
 import { buildManifest, expandPatterns, missingExact } from "./manifest.ts";
 import type { ZnakiOptions } from "./manifest.ts";
 import { SourceRegistry } from "./source.ts";
@@ -61,6 +72,12 @@ export default function znaki(options: ZnakiOptions): Plugin {
   let excludedPaths = new Set<string>();
   let spriteVersion = 0;
   let lazyVersion = 0;
+  let compileOptions: CompileIconsOptions = {};
+  let server: ViteDevServer | null = null;
+  // Files rendering `<PreloadSprite inline />`, shared by every environment: the
+  // document that inlines the sprite may be server-only, yet client icons must
+  // agree on same-document hrefs.
+  const inlineFiles = new Set<string>();
 
   function stateFor(environment: { name: string }): EnvState {
     // Keyed per environment; harnesses without a name share one key consistently.
@@ -73,10 +90,12 @@ export default function znaki(options: ZnakiOptions): Plugin {
     return state;
   }
 
-  function manifestFor(state: EnvState): { sprite: string[]; lazy: string[] } {
+  function manifestFor(...envs: EnvState[]): { sprite: string[]; lazy: string[] } {
     const collected = new Set<string>();
-    for (const file of state.files.values()) {
-      for (const name of file.names) collected.add(name);
+    for (const state of envs) {
+      for (const file of state.files.values()) {
+        for (const name of file.names) collected.add(name);
+      }
     }
     const available = registry.names();
     return buildManifest({
@@ -89,6 +108,23 @@ export default function znaki(options: ZnakiOptions): Plugin {
   function snapshot(state: EnvState): string {
     const manifest = manifestFor(state);
     return `${manifest.sprite.join("\0")}\n${manifest.lazy.join("\0")}`;
+  }
+
+  function inlineMarkup(...envs: EnvState[]): string {
+    return spriteMarkup(collectEntries(registry, manifestFor(...envs).sprite));
+  }
+
+  /** Re-run `record` while watching for a change of the global inline flag. */
+  function recordTracked(
+    state: EnvState,
+    id: string,
+    code: string,
+    mode: string,
+    warn: (message: string) => void,
+  ): { analysis: TransformAnalysis | null; inlineChanged: boolean } {
+    const before = inlineFiles.size > 0;
+    const analysis = record(state, id, code, mode, warn);
+    return { analysis, inlineChanged: before !== inlineFiles.size > 0 };
   }
 
   function checkCollisions(): void {
@@ -134,15 +170,19 @@ export default function znaki(options: ZnakiOptions): Plugin {
     let dynamicLocation: string | null = null;
     let analysis: TransformAnalysis | null = null;
 
+    let inline = false;
     if (accepts(id)) {
-      const compiled = compileIcons(code, id);
+      const compiled = compileIcons(code, id, compileOptions);
       if (compiled) {
         for (const name of compiled.names) names.add(name);
         dynamic = dynamic || compiled.dynamic;
         dynamicLocation = compiled.dynamicLocation;
+        inline = compiled.inline;
         analysis = { code: compiled.code, map: compiled.map };
       }
     }
+    if (inline) inlineFiles.add(id.split("?")[0]);
+    else inlineFiles.delete(id.split("?")[0]);
 
     const known = new Set<string>();
     for (const name of names) {
@@ -200,6 +240,14 @@ export default function znaki(options: ZnakiOptions): Plugin {
     );
   }
 
+  /** The inline flag is global, so every environment's sprite module goes stale together. */
+  function invalidateEverywhere(current: { moduleGraph: EnvironmentModuleGraph }): EnvironmentModuleNode[] {
+    for (const environment of Object.values(server?.environments ?? {})) {
+      if (environment.moduleGraph !== current.moduleGraph) invalidateVirtual(environment);
+    }
+    return invalidateVirtual(current);
+  }
+
   function finishHotUpdate(
     state: EnvState,
     environment: { moduleGraph: EnvironmentModuleGraph },
@@ -222,12 +270,15 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
     configResolved(config) {
       base = config.base;
+      const react = (config.plugins ?? []).some((plugin) => plugin.name.startsWith("vite:react"));
+      compileOptions = { htmlProp: react ? "dangerouslySetInnerHTML" : "innerHTML" };
       dtsPath = options.dts === false ? false : resolve(config.root, options.dts ?? "znaki.d.ts");
       excludedPaths = new Set([config.build.outDir, ...(options.exclude ?? [])].map((dir) => normalizePath(resolve(config.root, dir))));
     },
 
-    configureServer(server) {
-      server.middlewares.use((request, response, next) => {
+    configureServer(devServer) {
+      server = devServer;
+      devServer.middlewares.use((request, response, next) => {
         const asset = devAssetRequest(request.url, base);
         if (!asset) {
           next();
@@ -263,6 +314,7 @@ export default function znaki(options: ZnakiOptions): Plugin {
 
     resolveId(id) {
       if (id === SPRITE_ID) return SPRITE_RESOLVED;
+      if (id === INLINE_ID) return INLINE_RESOLVED;
       return null;
     },
 
@@ -277,11 +329,15 @@ export default function znaki(options: ZnakiOptions): Plugin {
             JSON.stringify(`${base}${DEV_LAZY_PATH.slice(1)}?v=${lazyVersion}`),
             manifest.sprite,
             manifest.lazy,
+            inlineFiles.size > 0,
           );
         }
         state.spriteRequested = true;
-        return spriteModuleCode(JSON.stringify(SPRITE_URL_TOKEN), JSON.stringify(LAZY_URL_TOKEN), null, null);
+        return spriteModuleCode(JSON.stringify(SPRITE_URL_TOKEN), JSON.stringify(LAZY_URL_TOKEN), null, null, null);
       }
+      // Dev runs the startup scan in the client environment only, while the
+      // inlining document usually renders in SSR: merge every environment.
+      if (id === INLINE_RESOLVED) return inlineModuleCode(mode === "dev" ? inlineMarkup(...states.values()) : null);
       return null;
     },
 
@@ -291,15 +347,18 @@ export default function znaki(options: ZnakiOptions): Plugin {
       const state = stateFor(this.environment);
       const mode = this.environment.mode;
       const before = snapshot(state);
-      const analysis = record(state, path, code, mode, (message) => this.warn(message));
+      const { analysis, inlineChanged } = recordTracked(state, path, code, mode, (message) => this.warn(message));
       const after = snapshot(state);
       if (mode === "dev" && after !== before) {
         const [beforeSprite, beforeLazy] = before.split("\n");
         const [afterSprite, afterLazy] = after.split("\n");
         if (afterSprite !== beforeSprite) spriteVersion += 1;
         if (afterLazy !== beforeLazy) lazyVersion += 1;
-        invalidateVirtual(this.environment);
+        // The merged inline markup is shared, so a discovery anywhere makes it stale everywhere.
+        if (afterSprite !== beforeSprite && inlineFiles.size > 0) invalidateEverywhere(this.environment);
+        else invalidateVirtual(this.environment);
       }
+      if (mode === "dev" && inlineChanged) invalidateEverywhere(this.environment);
       if (!analysis) return null;
       return { code: analysis.code, map: analysis.map };
     },
@@ -332,6 +391,10 @@ export default function znaki(options: ZnakiOptions): Plugin {
       const output = new MagicString(code);
       let touched = inject(output, code, JSON.stringify(SPRITE_TOKEN), JSON.stringify(JSON.stringify(manifest.sprite)));
       touched = inject(output, code, JSON.stringify(LAZY_TOKEN), JSON.stringify(JSON.stringify(manifest.lazy))) || touched;
+      touched = inject(output, code, JSON.stringify(INLINE_TOKEN), JSON.stringify(JSON.stringify(inlineFiles.size > 0))) || touched;
+      if (code.includes(JSON.stringify(SPRITE_MARKUP_TOKEN))) {
+        touched = inject(output, code, JSON.stringify(SPRITE_MARKUP_TOKEN), JSON.stringify(inlineMarkup(state))) || touched;
+      }
       if (state.spriteRef) {
         touched = inject(output, code, JSON.stringify(SPRITE_URL_TOKEN), assetUrl(this, state.spriteRef, chunk.fileName, base)) || touched;
       }
@@ -387,8 +450,11 @@ export default function znaki(options: ZnakiOptions): Plugin {
         for (const tracked of state.files.keys()) {
           if (tracked.startsWith(`${path}?`)) state.files.delete(tracked);
         }
-        record(state, path, code, environment.mode, warn);
-        return finishHotUpdate(state, environment, before, modules);
+        const { inlineChanged } = recordTracked(state, path, code, environment.mode, warn);
+        const updated = finishHotUpdate(state, environment, before, modules);
+        if (!inlineChanged) return updated;
+        const stale = invalidateEverywhere(environment).filter((module) => !updated.includes(module));
+        return [...updated, ...stale];
       });
     },
   };
@@ -424,8 +490,12 @@ function inject(output: MagicString, source: string, search: string, replacement
 }
 
 function invalidateVirtual(environment: { moduleGraph: EnvironmentModuleGraph }): EnvironmentModuleNode[] {
-  const sprite = environment.moduleGraph.getModuleById(SPRITE_RESOLVED);
-  if (!sprite) return [];
-  environment.moduleGraph.invalidateModule(sprite);
-  return [sprite];
+  const stale: EnvironmentModuleNode[] = [];
+  for (const id of [SPRITE_RESOLVED, INLINE_RESOLVED]) {
+    const module = environment.moduleGraph.getModuleById(id);
+    if (!module) continue;
+    environment.moduleGraph.invalidateModule(module);
+    stale.push(module);
+  }
+  return stale;
 }
